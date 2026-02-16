@@ -1,0 +1,131 @@
+{
+    "nodes": [
+        {
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "hours",
+                            "minutes": 0,
+                            "hours": 8
+                        }
+                    ]
+                }
+            },
+            "name": "Daily Schedule (8AM)",
+            "type": "n8n-nodes-base.cron",
+            "typeVersion": 1,
+            "position": [
+                250,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "requestMethod": "POST",
+                "url": "http://app-services:8000/generate/job",
+                "options": {},
+                "queryParametersUi": {
+                    "parameter": [
+                        {
+                            "name": "brand_id",
+                            "value": "brand_001"
+                        },
+                        {
+                            "name": "content_type",
+                            "value": "quote"
+                        }
+                    ]
+                }
+            },
+            "name": "Generate Job (Brain)",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 1,
+            "position": [
+                450,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "requestMethod": "POST",
+                "url": "http://render-service:8001/render",
+                "jsonParameters": true,
+                "options": {},
+                "bodyParametersUi": {
+                    "parameter": [
+                        {
+                            "name": "job_id",
+                            "value": "={{$node[\"Generate Job (Brain)\"].json[\"job_id\"]}}"
+                        }
+                    ]
+                }
+            },
+            "name": "Render Video",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 1,
+            "position": [
+                650,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "requestMethod": "POST",
+                "url": "http://app-services:8002/publish",
+                "jsonParameters": true,
+                "options": {},
+                "bodyParametersUi": {
+                    "parameter": [
+                        {
+                            "name": "job_id",
+                            "value": "={{$node[\"Generate Job (Brain)\"].json[\"job_id\"]}}"
+                        }
+                    ]
+                }
+            },
+            "name": "Publish to Channels",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 1,
+            "position": [
+                850,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "Daily Schedule (8AM)": {
+            "main": [
+                [
+                    {
+                        "node": "Generate Job (Brain)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Generate Job (Brain)": {
+            "main": [
+                [
+                    {
+                        "node": "Render Video",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Render Video": {
+            "main": [
+                [
+                    {
+                        "node": "Publish to Channels",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}

@@ -1,0 +1,49 @@
+# ═══ Sovereign AI Pipeline Dependencies ═══
+
+# Core
+yt-dlp>=2024.1.0
+python-dotenv>=1.0.0
+colorama>=0.4.6
+
+# Transcription (GPU-accelerated)
+faster-whisper>=1.0.0
+
+# LLM Integration
+google-generativeai>=0.4.0
+openai>=1.10.0
+
+# Vision / Face Tracking
+opencv-python>=4.9.0
+mediapipe>=0.10.9
+numpy>=1.24.0
+
+# B-Roll Semantic Search (CLIP + FAISS)
+# Install PyTorch first: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# git+https://github.com/openai/CLIP.git@main
+ftfy>=6.1.0
+faiss-cpu>=1.7.4
+Pillow>=10.0.0
+
+# Audio Analysis
+librosa>=0.10.0
+soundfile>=0.12.0
+
+# Social Media Distribution
+requests>=2.31.0
+schedule>=1.2.0
+
+# Utilities
+# Utilities
+tqdm>=4.66.0
+scenedetect>=0.6.2
+aiohttp>=3.9.0
+
+# AutoShorts Gold (Local Cinema)
+torch>=2.1.0 --index-url https://download.pytorch.org/whl/cu118
+diffusers>=0.25.0
+transformers>=4.36.0
+accelerate>=0.25.0
+safetensors>=0.4.1
+scipy>=1.11.0
+pydub>=0.25.1
+librosa>=0.10.1

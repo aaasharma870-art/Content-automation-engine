@@ -1,0 +1,78 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Build output
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes (local)
+pgdata/
+s3data/
+n8ndata/
+grafanadata/
+
+# Logs
+*.log
+logs/
+
+# Credentials (never commit)
+n8n/credentials/
+*.pem
+*.key
+
+# Temporary render files
+tmp/
+temp/
+*.mp4
+*.mp3
+*.wav
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Large Data (Exclude from Git)
+# Large Data (Exclude from Git)
+output/
+data/
+services/autoshorts/data/
+assets/broll/
+assets/models/
+assets/persistent/
+*.mp4
+*.mkv
+*.mov
+*.avi
+ffmpeg.zip
+ffmpeg-*/
+*.mp3
+*.wav
+*.mov
+
+# Binaries / External Tools
+ffmpeg*/
+ffprobe*/
+*.exe
+*.zip
+*.7z

@@ -1,0 +1,50 @@
+# ☁️ Serverless ACE (Pure n8n)
+
+You chose the **Serverless Route**. This means you don't need to run Docker, Python, or manage a VPS.
+Instead, you will run everything inside **n8n** and use 3rd party APIs.
+
+---
+
+## ⚠️ The Trade-Off
+*   **Pro**: No server management. simpler setup.
+*   **Con**: You cannot use our free FFmpeg engine. You MUST pay for a Video Generation API (like Creatomate or Shotstack).
+
+---
+
+## 1. Setup Guide
+
+### A. Get n8n
+1.  Sign up for [n8n Cloud
+](https: //n8n.io) (or use your existing instance).
+
+### B. Get API Keys
+You need 3 keys:
+1.  **OpenAI** (Script Writing): [Get Key
+](https: //platform.openai.com)
+2.  **Pexels** (Stock Video): [Get Key
+](https: //www.pexels.com/api/)
+3.  **Creatomate** (Video Rendering): [Sign Up
+](https: //creatomate.com)
+    *   Create a template in Creatomate.
+    *   Note your `Template ID` and `API Key`.
+
+### C. Import Workflow
+1.  Download `n8n_serverless.json` from this repo.
+2.  Import it into n8n.
+3.  **Configure Nodes**:
+    *   **AI Writer**: Connect your OpenAI Credentials.
+    *   **Asset Finder**: Paste your Pexels Key in the Header (`Authorization`).
+    *   **Render**: Paste your Creatomate Key and Template ID.
+
+---
+
+## 2. How it Works
+1.  **Trigger**: Wakes up daily.
+2.  **AI Writer**: GPT-4 writes the script and picks visual keywords.
+3.  **Asset Finder**: Searches Pexels for a portrait video.
+4.  **Render**: Sends the text + video URL to Creatomate to burn the video.
+5.  **Publish**: (Add your YouTube/TikTok nodes here).
+
+---
+*Back to [README.md
+](README.md)*

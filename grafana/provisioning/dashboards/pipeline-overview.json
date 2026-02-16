@@ -1,0 +1,350 @@
+{
+  "uid": "aibrain-pipeline",
+  "title": "AI Brain — Pipeline Overview",
+  "tags": ["aibrain", "pipeline"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "brand",
+        "type": "query",
+        "datasource": { "type": "postgres", "uid": "aibrain-pg" },
+        "query": "SELECT id AS __value, name AS __text FROM brands ORDER BY name",
+        "includeAll": true,
+        "allValue": "%",
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Jobs by State (now)",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "aibrain-pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT state AS metric, COUNT(*) AS value FROM jobs WHERE ($brand = '%' OR brand_id::text = $brand) GROUP BY state ORDER BY value DESC",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right" },
+        "pieType": "donut"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Jobs Created (24h)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 6, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "aibrain-pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS \"Jobs\" FROM jobs WHERE created_at >= NOW() - INTERVAL '24 hours' AND ($brand = '%' OR brand_id::text = $brand)",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": {
+        "defaults": { "thresholds": { "steps": [{ "color": "blue", "value": null }] } }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Posted (24h)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 9, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "aibrain-pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS \"Posted\" FROM jobs WHERE state = 'POSTED' AND updated_at >= NOW() - INTERVAL '24 hours' AND ($brand = '%' OR brand_id::text = $brand)",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": {
+        "defaults": { "thresholds": { "steps": [{ "color": "green", "value": null }] } }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Failed (24h)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 12, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "aibrain-pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS \"Failed\" FROM jobs WHERE state = 'FAILED' AND updated_at >= NOW() - INTERVAL '24 hours' AND ($brand = '%' OR brand_id::text = $brand)",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": {
+        "defaults": { "thresholds": { "steps": [{ "color": "red", "value": null }] } }
+      }
+    },
+    {
+      "id": 5,
+      "title": "DLQ Unresolved",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 15, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "aibrain-pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS \"DLQ\" FROM dead_letter_queue WHERE resolved_at IS NULL",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 3 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Success Rate (24h)",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "aibrain-pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT CASE WHEN COUNT(*) = 0 THEN 100 ELSE ROUND(100.0 * COUNT(*) FILTER (WHERE state IN ('POSTED','DRAFTED','ANALYZED')) / COUNT(*), 1) END AS \"Rate\" FROM jobs WHERE created_at >= NOW() - INTERVAL '24 hours' AND state NOT IN ('QUEUED','RESEARCHING','WRITING','AUDITING','RENDERING','UPLOADING') AND ($brand = '%' OR brand_id::text = $brand)",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "options": { "showThresholdLabels": false, "showThresholdMarkers": true },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "green", "value": 90 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Daily Spend (USD)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 6, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "aibrain-pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(SUM(amount_usd), 0) AS \"Spend\" FROM daily_spend WHERE spend_date = CURRENT_DATE AND ($brand = '%' OR brand_id::text = $brand)",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 3 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Avg Render Time",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 9, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "aibrain-pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT ROUND(AVG(render_duration_ms) / 1000.0, 1) AS \"Seconds\" FROM jobs WHERE render_duration_ms IS NOT NULL AND created_at >= NOW() - INTERVAL '24 hours' AND ($brand = '%' OR brand_id::text = $brand)",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 60 },
+              { "color": "red", "value": 120 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Avg OpenAI Cost / Job",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 12, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "aibrain-pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT ROUND(AVG(openai_cost_usd), 4) AS \"Cost\" FROM jobs WHERE openai_cost_usd > 0 AND created_at >= NOW() - INTERVAL '24 hours' AND ($brand = '%' OR brand_id::text = $brand)",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.05 },
+              { "color": "red", "value": 0.15 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Job Throughput (hourly)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "aibrain-pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('hour', created_at) AS time, COUNT(*) AS \"Created\", COUNT(*) FILTER (WHERE state = 'POSTED') AS \"Posted\", COUNT(*) FILTER (WHERE state = 'FAILED') AS \"Failed\" FROM jobs WHERE created_at >= $__timeFrom() AND created_at <= $__timeTo() AND ($brand = '%' OR brand_id::text = $brand) GROUP BY 1 ORDER BY 1",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Failed" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Posted" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] }
+        ]
+      },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 11,
+      "title": "Daily Spend (7 days)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "aibrain-pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT spend_date AS time, SUM(amount_usd) AS \"USD\" FROM daily_spend WHERE spend_date >= CURRENT_DATE - INTERVAL '7 days' AND ($brand = '%' OR brand_id::text = $brand) GROUP BY spend_date ORDER BY spend_date",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": { "fillOpacity": 20, "drawStyle": "bars" }
+        }
+      }
+    },
+    {
+      "id": 12,
+      "title": "Render Duration Distribution",
+      "type": "histogram",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "postgres", "uid": "aibrain-pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT render_duration_ms / 1000.0 AS \"Duration (s)\" FROM jobs WHERE render_duration_ms IS NOT NULL AND created_at >= $__timeFrom() AND created_at <= $__timeTo() AND ($brand = '%' OR brand_id::text = $brand)",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "options": { "bucketSize": 10 },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "color": { "mode": "palette-classic" } }
+      }
+    },
+    {
+      "id": 13,
+      "title": "Failure Breakdown by State",
+      "type": "barchart",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "postgres", "uid": "aibrain-pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(failed_at_state::text, 'unknown') AS \"Failed At\", COUNT(*) AS \"Count\" FROM jobs WHERE state = 'FAILED' AND created_at >= $__timeFrom() AND created_at <= $__timeTo() AND ($brand = '%' OR brand_id::text = $brand) GROUP BY failed_at_state ORDER BY \"Count\" DESC",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" } }
+      }
+    },
+    {
+      "id": 14,
+      "title": "DLQ Entries (unresolved)",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "postgres", "uid": "aibrain-pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT d.created_at AS \"Time\", j.id AS \"Job\", d.failed_state AS \"State\", d.attempt_count AS \"Attempts\", LEFT(d.error_message, 120) AS \"Error\", b.name AS \"Brand\" FROM dead_letter_queue d JOIN jobs j ON d.job_id = j.id JOIN brands b ON j.brand_id = b.id WHERE d.resolved_at IS NULL AND ($brand = '%' OR j.brand_id::text = $brand) ORDER BY d.created_at DESC LIMIT 50",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Time", "desc": true }]
+      }
+    },
+    {
+      "id": 15,
+      "title": "Recent Jobs",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 32 },
+      "datasource": { "type": "postgres", "uid": "aibrain-pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT j.created_at AS \"Created\", b.name AS \"Brand\", j.platform AS \"Platform\", j.state AS \"State\", j.topic AS \"Topic\", j.attempt_count AS \"Attempts\", ROUND(j.openai_cost_usd, 4) AS \"Cost\", j.render_duration_ms AS \"Render ms\" FROM jobs j JOIN brands b ON j.brand_id = b.id WHERE ($brand = '%' OR j.brand_id::text = $brand) ORDER BY j.created_at DESC LIMIT 30",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Created", "desc": true }]
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

@@ -1,0 +1,176 @@
+{
+    "nodes": [
+        {
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "hours",
+                            "minutes": 0,
+                            "hours": 9
+                        }
+                    ]
+                }
+            },
+            "name": "Morning Trigger",
+            "type": "n8n-nodes-base.cron",
+            "typeVersion": 1,
+            "position": [
+                250,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "requestMethod": "POST",
+                "url": "http://app-services:8000/step/research",
+                "queryParametersUi": {
+                    "parameter": [
+                        {
+                            "name": "brand_id",
+                            "value": "brand_001"
+                        }
+                    ]
+                }
+            },
+            "name": "Step 1: Research",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 1,
+            "position": [
+                450,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "requestMethod": "POST",
+                "url": "http://app-services:8000/step/script",
+                "queryParametersUi": {
+                    "parameter": [
+                        {
+                            "name": "brand_id",
+                            "value": "brand_001"
+                        },
+                        {
+                            "name": "topic",
+                            "value": "={{$node[\"Step 1: Research\"].json[\"best_topic\"]}}"
+                        },
+                        {
+                            "name": "content_type",
+                            "value": "quote"
+                        }
+                    ]
+                }
+            },
+            "name": "Step 2: Write Script",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 1,
+            "position": [
+                650,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "requestMethod": "POST",
+                "url": "http://app-services:8000/step/job_spec",
+                "jsonParameters": true,
+                "bodyParametersUi": {
+                    "parameter": [
+                        {
+                            "name": "brand_id",
+                            "value": "brand_001"
+                        },
+                        {
+                            "name": "topic",
+                            "value": "={{$node[\"Step 1: Research\"].json[\"best_topic\"]}}"
+                        },
+                        {
+                            "name": "content_type",
+                            "value": "quote"
+                        },
+                        {
+                            "name": "script",
+                            "value": "={{$node[\"Step 2: Write Script\"].json[\"script\"]}}"
+                        }
+                    ]
+                }
+            },
+            "name": "Step 3: Build Spec",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 1,
+            "position": [
+                850,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "requestMethod": "POST",
+                "url": "http://render-service:8001/render",
+                "jsonParameters": true,
+                "bodyParametersUi": {
+                    "parameter": [
+                        {
+                            "name": "job_id",
+                            "value": "={{$node[\"Step 3: Build Spec\"].json[\"job_id\"]}}"
+                        }
+                    ]
+                }
+            },
+            "name": "Step 4: Render",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 1,
+            "position": [
+                1050,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "Morning Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Step 1: Research",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Step 1: Research": {
+            "main": [
+                [
+                    {
+                        "node": "Step 2: Write Script",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Step 2: Write Script": {
+            "main": [
+                [
+                    {
+                        "node": "Step 3: Build Spec",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Step 3: Build Spec": {
+            "main": [
+                [
+                    {
+                        "node": "Step 4: Render",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}
