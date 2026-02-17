@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep:*)",
+      "Bash(ls \"c:\\\\Users\\\\aaash\\\\.gemini\\\\antigravity\\\\scratch\\\\.automation\\\\assets\\\\luts\"\" 2>/dev/null; echo \"---\"; ls \"c:Usersaaash.geminiantigravityscratch.automationassetssfx\"\")",
+      "Bash(ls \"c:\\\\Users\\\\aaash\\\\.gemini\\\\antigravity\\\\scratch\\\\.automation\\\\assets\\\\fonts\"\" 2>/dev/null; echo \"---\"; ls \"c:Usersaaash.geminiantigravityscratch.automationassetsbroll\"\")",
+      "Bash(python:*)"
+    ]
+  }
+}

@@ -49,10 +49,18 @@ class LocalFoundry:
         
         # 3. Generate Video
         self.load_vid_model()
-        frames = self.vid_pipe(image, decode_chunk_size=2, generator=torch.manual_seed(42), motion_bucket_id=127, noise_aug_strength=0.1).frames[0]
+        frames = self.vid_pipe(
+            image, 
+            decode_chunk_size=2, 
+            generator=torch.manual_seed(42), 
+            motion_bucket_id=180, # Maximized motion for 0.75s cuts
+            noise_aug_strength=0.1
+        ).frames[0]
         
         # 4. Save & Final Flush
-        export_to_video(frames, output_path, fps=7)
+        # fps=6 -> ~4.16s duration (25 frames)
+        # We need >4.0s for the flash cut filter
+        export_to_video(frames, output_path, fps=6) 
         log("FOUNDRY", f"Saved video: {output_path}", "OK")
         
         del self.vid_pipe

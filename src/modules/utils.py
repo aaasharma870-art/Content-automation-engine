@@ -28,10 +28,9 @@ def log(module: str, message: str, level: str = "INFO"):
 def get_ffmpeg_bin():
     """
     Locate FFmpeg binary.
-    Prioritizes bundled version, then system PATH.
+    Prioritizes bundled version, then system PATH, then imageio-ffmpeg.
     """
     # 1. Check for bundled generic path (from sister service)
-    # Assuming standard project structure
     root = Path(__file__).resolve().parent.parent.parent.parent
     bundled = list(root.glob("ffmpeg-*/bin/ffmpeg.exe"))
     if bundled:
@@ -46,7 +45,19 @@ def get_ffmpeg_bin():
     if system_ffmpeg:
         return system_ffmpeg
         
-    raise FileNotFoundError("FFmpeg binary not found! Please install FFmpeg.")
+    # 3. Check imageio-ffmpeg (pip install imageio-ffmpeg)
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except (ImportError, RuntimeError):
+        pass
+
+    # 4. Check environment variable
+    env_path = os.environ.get("FFMPEG_PATH")
+    if env_path and os.path.isfile(env_path):
+        return env_path
+        
+    raise FileNotFoundError("FFmpeg binary not found! Please install FFmpeg or imageio-ffmpeg.")
 
 def get_ffprobe_bin():
     """Locate FFprobe binary."""

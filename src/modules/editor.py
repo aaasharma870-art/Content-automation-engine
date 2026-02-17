@@ -29,7 +29,9 @@ from config import (
     MUSIC_VOLUME_DB, MUSIC_DIR, PROCESSED_DIR,
     USE_NVENC, NVENC_PRESET, BROLL_OVERLAY_DURATION,
     USE_HWACCEL_CUDA, LUT_FILE, LUT_DIR, DYNAMIC_ZOOM_INTENSITY,
-    SAFE_ZONE_BOTTOM,
+    SAFE_ZONE_BOTTOM, SOCIAL_LUFS, VISUAL_STYLE_LUT_MAP,
+    EMPHASIS_COLOR_KEY_NOUN, EMPHASIS_COLOR_KEY_ADJECTIVE, EMPHASIS_COLOR_NEGATIVE,
+    SFX_DIR,
 )
 from src.utils.logger import log
 from src.utils.emoji_map import get_emoji_for_word
@@ -238,43 +240,77 @@ def select_background_music(voice_path: str = None) -> str | None:
 
 
 def build_sidechain_audio(voice_path: str, music_path: str, output_path: str,
-                          duration: float) -> str:
+                          duration: float, impact_moments: list = None) -> str:
     """
     Mix voice + music with sidechain compression (auto-ducking).
+    Optionally injects whoosh/impact SFX at impact_moments timestamps.
 
     The voice acts as the sidechain control: when speech is detected,
     the music volume drops automatically.
-
-    FFmpeg filtergraph:
-    - Trim music to clip duration
-    - Lower music base volume
-    - Apply sidechaincompress with voice as control
-    - Mix compressed music with voice
     """
     log("EDITOR", "Building sidechain mix (auto-ducking)...")
 
-    # Complex filter: voice ducks music
-    filter_complex = (
-        # Input 0 = voice, Input 1 = music
-        # Lower music volume first
-        f"[1:a]volume={MUSIC_VOLUME_DB}dB,atrim=duration={duration},asetpts=PTS-STARTPTS[music];"
-        # Split voice for sidechain control
-        f"[0:a]asplit=2[voice][sc];"
-        # Sidechain compress: music controlled by voice
-        f"[music][sc]sidechaincompress="
-        f"threshold={SIDECHAIN_THRESHOLD}:"
-        f"ratio={SIDECHAIN_RATIO}:"
-        f"attack={SIDECHAIN_ATTACK}:"
-        f"release={SIDECHAIN_RELEASE}"
-        f"[ducked_music];"
-        # Mix voice + ducked music
-        f"[voice][ducked_music]amix=inputs=2:duration=first:dropout_transition=2[aout]"
-    )
+    # ── Collect SFX files for impact moments ──
+    sfx_inputs = []
+    sfx_filter_parts = []
+    sfx_labels = []
+    if impact_moments and SFX_DIR.exists():
+        sfx_files = []
+        transitions_dir = SFX_DIR / "transitions"
+        if transitions_dir.exists():
+            sfx_files = list(transitions_dir.glob("*.wav")) + list(transitions_dir.glob("*.mp3"))
+
+        if sfx_files:
+            log("EDITOR", f"Injecting {min(len(impact_moments), len(sfx_files))} SFX at impact moments")
+            for i, ts in enumerate(impact_moments[:5]):  # Cap at 5 SFX max
+                sfx_file = random.choice(sfx_files)
+                sfx_inputs.extend(["-i", str(sfx_file)])
+                # J-cut: start SFX 200ms before the impact moment
+                delay_ms = max(0, int((ts - 0.2) * 1000))
+                sfx_idx = 2 + i  # Input 0=voice, 1=music, 2+=SFX
+                sfx_filter_parts.append(
+                    f"[{sfx_idx}:a]adelay={delay_ms}|{delay_ms},volume=0.5[sfx{i}]"
+                )
+                sfx_labels.append(f"[sfx{i}]")
+
+    # ── Build filter complex ──
+    if sfx_filter_parts:
+        # Mix SFX into music before sidechain
+        sfx_chain = ";".join(sfx_filter_parts)
+        all_music_inputs = "[music_trim]" + "".join(sfx_labels)
+        mix_count = 1 + len(sfx_labels)
+        filter_complex = (
+            f"[1:a]volume={MUSIC_VOLUME_DB}dB,atrim=duration={duration},asetpts=PTS-STARTPTS[music_trim];"
+            f"{sfx_chain};"
+            f"{all_music_inputs}amix=inputs={mix_count}:duration=first[music];"
+            f"[0:a]asplit=2[voice][sc];"
+            f"[music][sc]sidechaincompress="
+            f"threshold={SIDECHAIN_THRESHOLD}:"
+            f"ratio={SIDECHAIN_RATIO}:"
+            f"attack={SIDECHAIN_ATTACK}:"
+            f"release={SIDECHAIN_RELEASE}"
+            f"[ducked_music];"
+            f"[voice][ducked_music]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+        )
+    else:
+        # Standard sidechain without SFX
+        filter_complex = (
+            f"[1:a]volume={MUSIC_VOLUME_DB}dB,atrim=duration={duration},asetpts=PTS-STARTPTS[music];"
+            f"[0:a]asplit=2[voice][sc];"
+            f"[music][sc]sidechaincompress="
+            f"threshold={SIDECHAIN_THRESHOLD}:"
+            f"ratio={SIDECHAIN_RATIO}:"
+            f"attack={SIDECHAIN_ATTACK}:"
+            f"release={SIDECHAIN_RELEASE}"
+            f"[ducked_music];"
+            f"[voice][ducked_music]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+        )
 
     cmd = [
         FFMPEG_BIN, "-y", "-hide_banner",
         "-i", voice_path,
         "-i", music_path,
+        *sfx_inputs,
         "-filter_complex", filter_complex,
         "-map", "[aout]",
         "-c:a", "aac", "-b:a", "192k",
@@ -287,7 +323,8 @@ def build_sidechain_audio(voice_path: str, music_path: str, output_path: str,
         log("EDITOR", "Using voice only (no music)", "WARN")
         shutil.copy2(voice_path, output_path)
     else:
-        log("EDITOR", "Sidechain mix complete (music auto-ducks under speech)", "OK")
+        sfx_note = f" + {len(sfx_filter_parts)} SFX" if sfx_filter_parts else ""
+        log("EDITOR", f"Sidechain mix complete (auto-duck{sfx_note})", "OK")
 
     return output_path
 
@@ -303,11 +340,58 @@ def _parse_loudnorm_output(stderr: str) -> dict | None:
     return None
 
 
+def _normalize_final_mix(input_path: str, output_path: str) -> str:
+    """
+    Normalize the complete voice+music+sfx mix to social media loudness.
+    Target: -14 LUFS (TikTok/Reels/Shorts standard).
+    Prevents "loudness war" between quiet sources and full-volume SFX/music.
+    """
+    log("EDITOR", f"Final mix normalization to {SOCIAL_LUFS} LUFS...")
+
+    # Pass 1: Measure
+    measure_cmd = [
+        FFMPEG_BIN, "-i", input_path, "-hide_banner",
+        "-af", f"loudnorm=I={SOCIAL_LUFS}:TP=-1.0:LRA=7:print_format=json",
+        "-f", "null", "-"
+    ]
+    result = subprocess.run(measure_cmd, capture_output=True, text=True, timeout=300)
+    stats = _parse_loudnorm_output(result.stderr)
+
+    if stats:
+        filter_str = (
+            f"loudnorm=I={SOCIAL_LUFS}:TP=-1.0:LRA=7:"
+            f"measured_I={stats['input_i']}:"
+            f"measured_LRA={stats['input_lra']}:"
+            f"measured_TP={stats['input_tp']}:"
+            f"measured_thresh={stats['input_thresh']}:"
+            f"offset={stats['target_offset']}:"
+            f"linear=true"
+        )
+    else:
+        filter_str = f"loudnorm=I={SOCIAL_LUFS}:TP=-1.0:LRA=7"
+
+    # Pass 2: Apply
+    cmd = [
+        FFMPEG_BIN, "-y", "-i", input_path, "-hide_banner",
+        "-af", filter_str,
+        "-c:a", "aac", "-b:a", "192k",
+        output_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0:
+        log("EDITOR", "Final mix normalization failed, using original", "WARN")
+        shutil.copy2(input_path, output_path)
+    else:
+        log("EDITOR", f"Final mix normalized to {SOCIAL_LUFS} LUFS", "OK")
+
+    return output_path
+
+
 # ══════════════════════════════════════════════
 # 2. KINETIC TYPOGRAPHY (Hormozi Style)
 # ══════════════════════════════════════════════
 
-def generate_ass_subtitles(words: list, output_path: str) -> str:
+def generate_ass_subtitles(words: list, output_path: str, emphasis_map: list = None) -> str:
     """
     Generate .ass subtitles with Hormozi-style karaoke animation.
 
@@ -316,10 +400,27 @@ def generate_ass_subtitles(words: list, output_path: str) -> str:
     - White base text, yellow highlight for active word
     - Heavy black outline + drop shadow
     - Emoji injection for high-impact words
+    - Dynamic word coloring via emphasis_map (green/yellow/red)
     - Max 15 chars per line
     - \\kf tags for word-by-word color fill animation
     """
     log("EDITOR", f"Generating Hormozi captions ({len(words)} words)...")
+
+    # Build emphasis color lookup from Brain's emphasis_words
+    EMPHASIS_COLORS = {
+        "key_noun": EMPHASIS_COLOR_KEY_NOUN,
+        "key_adjective": EMPHASIS_COLOR_KEY_ADJECTIVE,
+        "negative": EMPHASIS_COLOR_NEGATIVE,
+    }
+    emphasis_lookup = {}
+    if emphasis_map:
+        for item in emphasis_map:
+            word_lower = item.get("word", "").lower().strip()
+            etype = item.get("type", "")
+            if word_lower and etype in EMPHASIS_COLORS:
+                emphasis_lookup[word_lower] = EMPHASIS_COLORS[etype]
+        if emphasis_lookup:
+            log("EDITOR", f"Emphasis coloring: {len(emphasis_lookup)} words tagged")
 
     # ── ASS Header ──────────────────────────────
     header = f"""[Script Info]
@@ -363,6 +464,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             emoji = get_emoji_for_word(w["word"])
             if emoji:
                 display_word = f"{display_word} {emoji}"
+
+            # Apply emphasis color override (green/yellow/red)
+            word_lower = w["word"].lower().strip()
+            if word_lower in emphasis_lookup:
+                color = emphasis_lookup[word_lower]
+                display_word = f"{{\\c{color}}}{display_word}{{\\c{CAPTION_PRIMARY_COLOR}}}"
 
             karaoke_text += f"{{\\kf{duration_cs}}}{display_word} "
 
@@ -481,21 +588,33 @@ def render_short(
     remove_silence(norm_audio, clean_audio)
 
     # ── Step 2: Background music + sidechain ───
+    impact_moments = clip_data.get("impact_moments", [])
     music_path = select_background_music(clean_audio)
     if music_path:
-        build_sidechain_audio(clean_audio, music_path, final_audio, clip_duration)
+        build_sidechain_audio(clean_audio, music_path, final_audio, clip_duration,
+                              impact_moments=impact_moments)
     else:
         shutil.copy2(clean_audio, final_audio)
 
+    # ── Step 2b: Final mix loudness normalization ──
+    final_normalized = str(work_dir / "final_audio_normalized.m4a")
+    _normalize_final_mix(final_audio, final_normalized)
+    final_audio = final_normalized
+
     # ── Step 3: Generate subtitles ─────────────
     ass_path = str(work_dir / "captions.ass")
-    generate_ass_subtitles(words, ass_path)
+    emphasis_map = clip_data.get("emphasis_words", [])
+    generate_ass_subtitles(words, ass_path, emphasis_map=emphasis_map)
 
     # ── Step 4: Build video filter chain ───────
     if scene_data["mode"] == "face" and scene_data["crop_data"]:
         filter_complex = _build_face_crop_filter(
             scene_data, source_w, source_h, ass_path
         )
+    elif scene_data["mode"] == "gameplay":
+        filter_complex = _build_gameplay_filter(scene_data, source_w, source_h, ass_path)
+    elif scene_data["mode"] == "split_screen":
+        filter_complex = _build_split_screen_filter(scene_data, source_w, source_h, ass_path)
     else:
         filter_complex = _build_screen_filter(source_w, source_h, ass_path)
 
@@ -514,13 +633,19 @@ def render_short(
         # Remove the [vout] label from existing filter, add B-roll chain
         base_filter = filter_complex.replace("[vout]", "[vmain]")
 
+        # Apply 300ms fade-in/out for smooth B-roll transitions
+        fade_dur = 0.3
+        fade_out_start = max(0, broll_dur - fade_dur)
         broll_filter = (
             f"{base_filter};"
             f"[2:v]scale={TARGET_WIDTH}:{TARGET_HEIGHT}:"
             f"force_original_aspect_ratio=decrease,"
             f"pad={TARGET_WIDTH}:{TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
-            f"setpts=PTS-STARTPTS[broll_scaled];"
-            f"[vmain][broll_scaled]overlay=enable='"
+            f"setpts=PTS-STARTPTS,"
+            f"fade=in:st=0:d={fade_dur},"
+            f"fade=out:st={fade_out_start}:d={fade_dur}"
+            f"[broll_faded];"
+            f"[vmain][broll_faded]overlay=enable='"
             f"between(t,{insert_t},{insert_t + broll_dur})'"
             f"[vout]"
         )
@@ -530,18 +655,27 @@ def render_short(
             log("RENDER", f"B-roll file not found: {broll_insert.get('video_path', '?')}", "WARN")
 
     # ── Step 4c: Apply LUT color grading ──────
-    if LUT_FILE:
-        lut_path = LUT_DIR / LUT_FILE
+    # Priority: explicit LUT_FILE config > visual_style keyword mapping > none
+    lut_file = LUT_FILE
+    if not lut_file:
+        visual_style = clip_data.get("visual_style", "").lower()
+        for keyword, mapped_lut in VISUAL_STYLE_LUT_MAP.items():
+            if keyword in visual_style:
+                lut_file = mapped_lut
+                log("RENDER", f"Visual style '{visual_style}' -> LUT: {mapped_lut}")
+                break
+
+    if lut_file:
+        lut_path = LUT_DIR / lut_file
         if lut_path.exists():
             lut_escaped = str(lut_path).replace("\\", "/").replace(":", "\\:")
-            # Insert LUT before the [vout] label
             filter_complex = filter_complex.replace(
                 "[vout]",
                 f"lut3d='{lut_escaped}'[vout]"
             )
-            log("RENDER", f"LUT applied: {LUT_FILE}")
+            log("RENDER", f"LUT applied: {lut_file}")
         else:
-            log("RENDER", f"LUT file not found: {lut_path}", "WARN")
+            log("RENDER", f"LUT file not found: {lut_path} (skipping)", "WARN")
 
     # ── Step 5: Build hwaccel + encode command ─
     encoder, encoder_opts = _get_encoder()
@@ -552,46 +686,65 @@ def render_short(
         hwaccel_args = ["-hwaccel", "cuda"]  # Decode on GPU, filter on CPU
         log("RENDER", "CUDA hardware-accelerated decoding enabled")
 
-    render_cmd = [
-        FFMPEG_BIN, "-y", "-hide_banner",
-        *hwaccel_args,
-        "-ss", str(clip_start), "-t", str(clip_duration),
-        "-i", video_path,
-        "-i", final_audio,
-        *broll_input_args,
-        "-filter_complex", filter_complex,
-        "-map", "[vout]",
-        "-map", "1:a",
-        "-c:v", encoder, *encoder_opts,
-        "-c:a", "aac", "-b:a", "192k",
-        "-r", str(TARGET_FPS),
-        "-movflags", "+faststart",
-        output_path,
+    # ── Step 5b: 3-Stage Progressive Render ────
+    # Build render attempts: Full -> libx264 Full -> libx264 Safe (stripped filters)
+    render_attempts = [
+        {"enc": encoder, "opts": list(encoder_opts), "filt": filter_complex,
+         "hwaccel": hwaccel_args, "label": f"{encoder}_full"},
     ]
 
-    log("RENDER", f"Encoding with {encoder}...")
-    result = subprocess.run(render_cmd, capture_output=True, text=True, timeout=900)
+    # Fallback 1: If NVENC, try libx264 with same filters
+    if encoder == "h264_nvenc":
+        render_attempts.append({
+            "enc": "libx264",
+            "opts": ["-preset", "medium", "-crf", "20", "-maxrate", "30M",
+                     "-bufsize", "60M", "-profile:v", "high"],
+            "filt": filter_complex,
+            "hwaccel": [],
+            "label": "libx264_full",
+        })
 
-    if result.returncode != 0 and encoder == "h264_nvenc":
-        log("RENDER", "NVENC failed, retrying with libx264...", "WARN")
-        render_cmd[render_cmd.index("h264_nvenc")] = "libx264"
-        idx = render_cmd.index("-preset")
-        render_cmd[idx + 1] = "medium"
-        try:
-            bv_idx = render_cmd.index("-b:v")
-            render_cmd.pop(bv_idx + 1)
-            render_cmd.pop(bv_idx)
-        except ValueError:
-            pass
-        render_cmd.insert(render_cmd.index("-c:v") + 2, "-crf")
-        render_cmd.insert(render_cmd.index("-crf") + 1, "20")
-        result = subprocess.run(render_cmd, capture_output=True, text=True, timeout=900)
+    # Fallback 2: libx264 with stripped filters (remove LUT, blur, bloom)
+    stripped = _strip_complex_filters(filter_complex)
+    render_attempts.append({
+        "enc": "libx264",
+        "opts": ["-preset", "fast", "-crf", "23"],
+        "filt": stripped,
+        "hwaccel": [],
+        "label": "libx264_safe",
+    })
 
-    if result.returncode != 0:
-        raise RuntimeError(f"FFmpeg render failed: {result.stderr[:500]}")
+    last_error = None
+    for attempt in render_attempts:
+        log("RENDER", f"Encoding: {attempt['label']}...")
+        cmd = [
+            FFMPEG_BIN, "-y", "-hide_banner", "-loglevel", "error",
+            *attempt["hwaccel"],
+            "-ss", str(clip_start), "-t", str(clip_duration),
+            "-i", video_path,
+            "-i", final_audio,
+            *broll_input_args,
+            "-filter_complex", attempt["filt"],
+            "-map", "[vout]",
+            "-map", "1:a",
+            "-c:v", attempt["enc"], *attempt["opts"],
+            "-c:a", "aac", "-b:a", "192k",
+            "-r", str(TARGET_FPS),
+            "-movflags", "+faststart",
+            output_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        if result.returncode == 0:
+            log("RENDER", f"Render succeeded: {attempt['label']}", "OK")
+            break
+        # Capture last 1000 chars of stderr for meaningful error
+        last_error = result.stderr[-1000:] 
+        log("RENDER", f"Attempt '{attempt['label']}' failed: {last_error[:200]}...", "WARN")
+    else:
+        raise RuntimeError(f"All render attempts failed. Last error: {last_error}")
 
     # ── Cleanup ────────────────────────────────
-    for f in [raw_audio, norm_audio, clean_audio, final_audio, ass_path]:
+    for f in [raw_audio, norm_audio, clean_audio, final_audio, final_normalized, ass_path]:
         try:
             os.remove(f)
         except OSError:
@@ -670,6 +823,40 @@ def _build_face_crop_filter(scene_data, source_w, source_h, ass_path):
     )
 
 
+
+def _build_gameplay_filter(scene_data, source_w, source_h, ass_path):
+    """
+    Simple Center Crop filter for Gameplay mode.
+    Scales the center 9:16 crop to fill the target resolution.
+    """
+    
+    target_aspect = 9 / 16
+    crop_h = source_h
+    crop_w = int(crop_h * target_aspect)
+    
+    if crop_w > source_w:
+        crop_w = source_w
+        crop_h = int(crop_w / target_aspect)
+        
+    x = "(iw-ow)/2"
+    y = "(ih-oh)/2"
+    
+    x = "(iw-ow)/2"
+    y = "(ih-oh)/2"
+    
+    ass_escaped = ass_path.replace("\\", "/").replace(":", "\\:")
+    
+    # 1. Crop center
+    # 2. Scale up to target (1080x1920)
+    # Note: crop filter format: w:h:x:y
+    
+    return (
+        f"[0:v]crop={crop_w}:{crop_h}:{x}:{y},"
+        f"scale={TARGET_WIDTH}:{TARGET_HEIGHT},"
+        f"ass='{ass_escaped}'[vout]"
+    )
+
+
 def _build_screen_filter(source_w, source_h, ass_path):
     """FFmpeg filter for letterbox+blur with subtitle burn-in."""
     scale_factor = TARGET_WIDTH / source_w
@@ -718,3 +905,46 @@ def _check_nvenc() -> bool:
         return "h264_nvenc" in result.stdout
     except Exception:
         return False
+
+
+def _strip_complex_filters(filter_str: str) -> str:
+    """
+    Remove non-essential filters for safe-mode rendering.
+    Strips LUT, gaussian blur, and complex zoom expressions
+    while preserving core crop/scale/subtitle chain.
+    """
+    stripped = filter_str
+    # Remove lut3d='...' filter
+    stripped = re.sub(r",?lut3d='[^']*'", "", stripped)
+    # Remove gblur filter
+    stripped = re.sub(r",?gblur=sigma=\d+", "", stripped)
+    # Remove B-roll fade filters (if causing issues)
+    stripped = re.sub(r",fade=in:st=[\d.]+:d=[\d.]+,fade=out:st=[\d.]+:d=[\d.]+", "", stripped)
+    return stripped
+
+
+def _build_split_screen_filter(scene_data, source_w, source_h, ass_path):
+    """
+    FFmpeg filter for split-screen layout (2 speakers stacked vertically).
+    Crops two face regions from the source and stacks them top/bottom.
+    """
+    centers = scene_data.get("face_centers", [source_w // 3, 2 * source_w // 3])
+    half_h = TARGET_HEIGHT // 2
+    crop_w = int(source_h * (9 / 16))
+    half_crop = crop_w // 2
+
+    # Clamp crop positions to valid range
+    x1 = max(0, min(centers[0] - half_crop, source_w - crop_w))
+    x2 = max(0, min(centers[1] - half_crop, source_w - crop_w))
+
+    ass_escaped = ass_path.replace("\\", "/").replace(":", "\\:")
+
+    return (
+        f"[0:v]split=2[v1][v2];"
+        f"[v1]crop={crop_w}:{source_h}:{x1}:0,"
+        f"scale={TARGET_WIDTH}:{half_h}[face_a];"
+        f"[v2]crop={crop_w}:{source_h}:{x2}:0,"
+        f"scale={TARGET_WIDTH}:{half_h}[face_b];"
+        f"[face_a][face_b]vstack=inputs=2,"
+        f"ass='{ass_escaped}'[vout]"
+    )

@@ -41,7 +41,7 @@ Select the {max_clips} most engaging, self-contained segments ({min_dur}-{max_du
 |--------|--------|-------------|-------------|
 | Hook (30%) | "The one indicator that never lies..." | "Um, so today..." or "Let me explain..." |
 | Flow (25%) | Complete thought arc: setup → development → payoff | Mid-sentence cuts, dangling references |
-| Value (25%) | Concrete takeaway, emotional hit, drives shares | Vague filler, common knowledge repetition |
+| Value (25%) | Concrete takeaway + visual dynamism (movement, expressions, scene changes). Penalize static visuals with no B-roll potential. | Vague filler, motionless talking head with no visual hooks |
 | Trend (20%) | Aligns with current cultural search momentum | Obscure niche with no broader appeal |
 
 **virality_score = (hook * 0.30) + (flow * 0.25) + (value * 0.25) + (trend * 0.20)**
@@ -55,6 +55,7 @@ Select the {max_clips} most engaging, self-contained segments ({min_dur}-{max_du
 **CONTENT TYPE TAGGING:**
 - `"talking_head"`: Speaker on camera (DEFAULT)
 - `"screen_share"`: Charts, screens, visual data mentioned
+- `"gameplay"`: Gaming footage (Minecraft, GTA, Subway Surfers, etc.) — use when: no visible human speaker, game UI/HUD present, transcript references game actions/mechanics. This mode uses center-crop for full-screen immersive framing.
 
 **B-ROLL QUERY:**
 For each segment, identify ONE 3-second window needing visual supplementation.
@@ -64,12 +65,32 @@ Provide `broll_query` (descriptive phrase) and `broll_insert_time` (offset from 
 For each segment, identify the mood/vibe (e.g., "dark moody", "bright energetic", "luxury minimal").
 Field: `visual_style`
 
+**EMPHASIS MAP:**
+For each segment, identify 3-6 high-impact words that deserve visual emphasis in captions:
+- `"key_noun"`: Important nouns/subjects (highlighted green in captions)
+- `"key_adjective"`: Power adjectives/verbs (highlighted yellow in captions)
+- `"negative"`: Negative/warning words (highlighted red in captions)
+Field: `emphasis_words` (list of {{"word": "...", "type": "..."}})
+
+**IMPACT MOMENTS:**
+Identify 1-3 timestamps within each segment where a dramatic beat, topic shift, or reveal occurs.
+These are used for transition SFX (whoosh/impact sounds) placement.
+Field: `impact_moments` (list of float offsets from segment start, in seconds)
+
+**VISUAL VIABILITY:**
+{visual_viability_context}
+Before finalizing each segment, ask: "Does this segment have enough visual movement, expression changes, or scene variety to hold attention on a phone screen?"
+- If the segment is visually static AND no strong B-roll opportunity exists, reduce the Value score by 10-15 points.
+- Segments with dynamic gestures, scene changes, product demos, or strong facial expressions get a Value bonus.
+Field: `visual_viability_score` (0-99, for debugging)
+
 **STRICT RULES:**
 1. Each segment MUST start with a hook in the first 3 seconds
 2. Each segment MUST end on a COMPLETE thought (never mid-sentence)
 3. Use exact word-level timestamps from the transcript
 4. No overlapping segments
-5. SELF-VERIFY all timestamps before responding
+5. PREFER segments where the speaker is clearly visible or the subject is visually obvious (avoid vague or off-topic rants)
+6. SELF-VERIFY all timestamps before responding
 
 **OUTPUT FORMAT (STRICT JSON, NO MARKDOWN):**
 [
@@ -86,33 +107,47 @@ Field: `visual_style`
     "description": "Expert reveals the hidden signal most traders miss",
     "hook_text": "The one indicator that never lies...",
     "hashtags": ["#trading", "#stocks", "#investing", "#finance"],
-    "hashtags": ["#trading", "#stocks", "#investing", "#finance"],
     "broll_query": "close-up stock chart with green candles rising",
     "broll_insert_time": 12.0,
-    "visual_style": "high-tech financial data visualization"
+    "visual_style": "high-tech financial data visualization",
+    "emphasis_words": [{{"word": "never", "type": "negative"}}, {{"word": "indicator", "type": "key_noun"}}, {{"word": "hidden", "type": "key_adjective"}}],
+    "impact_moments": [8.5, 22.0],
+    "visual_viability_score": 75
   }}
 ]
 
 Return ONLY valid JSON. No markdown, no explanation, no code fences."""
 
 
-def analyze_transcript(full_text: str, metadata: dict = None) -> list:
+def analyze_transcript(full_text: str, metadata: dict = None, motion_score: str = "unknown") -> list:
     """
     Send transcript to LLM and get viral segment suggestions.
 
     Args:
         full_text: Complete transcript text
         metadata: Optional dict with video title/description
+        motion_score: CV-computed motion level ("low", "medium", "high", "unknown")
 
     Returns:
         List of clip dicts sorted by virality_score (highest first)
     """
     log("BRAIN", f"Analyzing transcript ({len(full_text)} chars)...")
+    log("BRAIN", f"Motion score: {motion_score}")
+
+    # Build visual viability context from CV signal
+    motion_labels = {
+        "low": "Motion_Score: Low (static shot / podcast / slideshow). Visually boring — penalize segments without strong B-roll potential.",
+        "medium": "Motion_Score: Medium (casual vlog / moderate movement). Average visual engagement.",
+        "high": "Motion_Score: High (dynamic action / walking / demos). Visually engaging — these segments hold attention well.",
+        "unknown": "Motion_Score: Unknown (no CV data available). Judge visual viability from transcript context only.",
+    }
+    visual_viability_context = motion_labels.get(motion_score, motion_labels["unknown"])
 
     system = SYSTEM_PROMPT.format(
         max_clips=MAX_CLIPS_PER_VIDEO,
         min_dur=CLIP_MIN_DURATION,
         max_dur=CLIP_MAX_DURATION,
+        visual_viability_context=visual_viability_context,
     )
 
     # Add context
@@ -256,6 +291,9 @@ def _parse_response(raw_text: str) -> list:
             "broll_query": str(clip.get("broll_query", "")),
             "broll_insert_time": float(clip.get("broll_insert_time", 0)),
             "visual_style": str(clip.get("visual_style", "cinematic")),
+            "emphasis_words": clip.get("emphasis_words", []),
+            "impact_moments": clip.get("impact_moments", []),
+            "visual_viability_score": int(clip.get("visual_viability_score", 50)),
         })
 
     return valid

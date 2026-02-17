@@ -109,7 +109,8 @@ def process_video(url: str):
     log("REPURPOSE", "─" * 40)
     log("REPURPOSE", "[PHASE 3/6] ANALYZING VIRALITY (LLM)")
 
-    clips = analyze_transcript(full_text, metadata)
+    motion_score = video_info.get("motion_score", "unknown")
+    clips = analyze_transcript(full_text, metadata, motion_score=motion_score)
 
     if not clips:
         raise RuntimeError("Brain found no viral segments in this video")
@@ -159,25 +160,49 @@ def process_video(url: str):
         log("REPURPOSE", f"[PHASE 5/6] RENDERING CLIP {clip_num}/{len(clips)}")
 
         # ── B-Roll search ──
+
+
+        # ── B-Roll search ──
+        # Re-enabled with stricter threshold (0.25) to avoid bad matches
         broll_insert = None
         broll_query = clip.get("broll_query", "")
-        if broll_query:
+        clip_duration = clip["end"] - clip["start"]
+        # Only search if query is specific enough (longer than 5 chars)
+        if broll_query and len(broll_query) > 5:
             try:
                 from src.modules.broll import find_broll
-                from config import BROLL_MIN_SIMILARITY
+                from config import BROLL_MIN_SIMILARITY, ALLOW_BROLL_FALLBACK
                 visual_style = clip.get("visual_style", "cinematic")
+
+                # Search local index first, then Pexels
                 broll_results = find_broll(broll_query, top_k=3, visual_style=visual_style)
-                broll_results = [r for r in broll_results if r["similarity"] >= BROLL_MIN_SIMILARITY]
-                if broll_results:
-                    best = broll_results[0]
-                    broll_insert = {
-                        "video_path": best["video_path"],
-                        "insert_time": clip.get("broll_insert_time", 10.0),
-                        "duration": 3.0,
-                    }
-                    log("REPURPOSE", f"  B-Roll (local): {best['video_name']} ✅")
-            except Exception:
-                pass
+
+                # Decoupled filtering: CLIP matches must pass threshold,
+                # Pexels fallbacks are accepted if ALLOW_BROLL_FALLBACK is True
+                valid_results = [
+                    r for r in broll_results
+                    if (r.get("similarity") is not None and r["similarity"] >= BROLL_MIN_SIMILARITY)
+                    or (r.get("is_fallback") and ALLOW_BROLL_FALLBACK)
+                ]
+
+                if valid_results:
+                    best = valid_results[0]
+                    # Don't insert B-roll if the segment is extremely short
+                    if clip_duration > 15:
+                        broll_insert = {
+                            "video_path": best["video_path"],
+                            "insert_time": clip.get("broll_insert_time", 10.0),
+                            "duration": 3.0,
+                        }
+                        sim_label = f"Sim: {best['similarity']:.2f}" if best.get("similarity") is not None else "fallback"
+                        log("REPURPOSE", f"  B-Roll selected: {best['video_name']} ({sim_label}, src: {best.get('source', '?')})")
+                    else:
+                        log("REPURPOSE", "  Clip too short for B-roll, skipping.")
+                else:
+                    log("REPURPOSE", f"  No B-roll found with similarity >= {BROLL_MIN_SIMILARITY}")
+
+            except Exception as e:
+                log("REPURPOSE", f"  B-Roll search failed: {e}", "WARN")
 
         # Generate filename
         safe_title = re.sub(r'[^\w\s-]', '', title)[:40].strip()
@@ -282,4 +307,9 @@ def _init_broll_index():
         pass
 
 def _preflight_checks():
-    pass # Simplified for brevity, original main.py had checks
+    """Verify required assets (fonts, LUTs, SFX) and auto-download what's missing."""
+    try:
+        from src.utils.asset_manager import ensure_all_assets
+        ensure_all_assets()
+    except Exception as e:
+        log("REPURPOSE", f"Asset check failed (non-fatal): {e}", "WARN")

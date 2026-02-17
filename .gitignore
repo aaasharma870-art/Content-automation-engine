@@ -76,3 +76,6 @@ ffprobe*/
 *.exe
 *.zip
 *.7z
+
+# Windows reserved filenames
+nul

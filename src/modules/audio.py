@@ -147,3 +147,141 @@ def duck_audio(voice_path: str, music_path: str, output_path: str, duration: flo
     ]
     
     subprocess.run(cmd, check=True)
+
+# ── Viral Audio Upgrade (J-Cuts & Micro-SFX) ──
+
+def generate_flow_audio(segments: list, output_path: str) -> dict:
+    """
+    Generate 'Flow Audio' using J-Cuts and Breath Removal.
+    
+    segments: List of text strings (Hook, Proof 1, etc.)
+    Returns: {"path": str, "duration": float, "timestamps": list}
+    """
+    from pydub import AudioSegment
+    from pydub.silence import detect_nonsilent
+    from modules.utils import get_ffmpeg_bin, get_ffprobe_bin
+
+    # Configure Pydub with local FFmpeg
+    AudioSegment.converter = get_ffmpeg_bin()
+    AudioSegment.ffprobe = get_ffprobe_bin()
+    
+    log("AUDIO", "Generating Viral Flow Audio (J-Cuts)...")
+    
+    combined = AudioSegment.empty()
+    segment_map = []
+    
+    # Temp file for TTS
+    temp_dir = Path(output_path).parent / "temp_tts"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    
+    current_time_ms = 0
+    
+    # Async TTS wrapper (using edge-tts CLI or helper would be better, 
+    # but here we reuse generate_narration logic strictly if possible, 
+    # or just call edge-tts directly for speed).
+    # Since generate_narration is async, we can't call it easily from sync function.
+    # We will assume caller provides dicts with 'text' and 'speed' or we defaults.
+    
+    # We'll rely on a localized helper to run TTS synchronously for this batch
+    import asyncio
+    
+    async def _batch_tts(segs):
+        files = []
+        voice = DEFAULT_VOICE
+        for i, text in enumerate(segs):
+            if not text: continue
+            out = temp_dir / f"seg_{i}.mp3"
+            communicate = edge_tts.Communicate(text, voice)
+            await communicate.save(str(out))
+            files.append(str(out))
+        return files
+        
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+    tts_files = loop.run_until_complete(_batch_tts(segments))
+    
+    for i, file_path in enumerate(tts_files):
+        seg = AudioSegment.from_file(file_path)
+        
+        # 1. Aggressive Silence Removal (Start/End)
+        # Scan for non-silent chunks
+        ranges = detect_nonsilent(seg, min_silence_len=50, silence_thresh=-45)
+        if ranges:
+            start_trim = ranges[0][0]
+            end_trim = ranges[-1][1]
+            seg = seg[start_trim:end_trim]
+            
+        # 2. J-Cut Overlap (Crossfade)
+        # Overlap by 200ms if not the first segment
+        OVERLAP = 200 # ms
+        
+        if i == 0:
+            combined += seg
+            current_time_ms += len(seg)
+        else:
+            # We append WITH crossfade, which effectively pulls the track back by OVERLAP ms
+            combined = combined.append(seg, crossfade=OVERLAP)
+            current_time_ms += (len(seg) - OVERLAP)
+        
+        segment_map.append({
+            "index": i,
+            "text": segments[i][:20] + "...",
+            "end_time": current_time_ms / 1000.0
+        })
+        
+        # Cleanup
+        os.remove(file_path)
+        
+    # 3. Inject Micro-SFX (Rhythm)
+    final_audio = _inject_micro_sfx(combined)
+    
+    # Export
+    final_audio.export(output_path, format="mp3")
+    log("AUDIO", f"Flow Audio saved: {output_path} (Duration: {len(final_audio)/1000:.2f}s)", "OK")
+    
+    return {
+        "path": output_path,
+        "duration": len(final_audio) / 1000.0,
+        "timestamps": segment_map
+    }
+
+def _inject_micro_sfx(audio_segment):
+    """
+    Inject soft 'whoosh' at 1.4s and 2.8s intervals of 4s blocks.
+    Syncs with the Visual Flash Cuts.
+    """
+    from pydub import AudioSegment
+    
+    # Load Soft Whoosh
+    # Assuming standard assets path
+    sfx_path = SFX_DIR / "transitions" / "soft_whoosh.wav"
+    if not sfx_path.exists():
+        # Fallback search or generate silence
+        log("AUDIO", "Soft Whoosh SFX not found, skipping injection.", "WARN")
+        return audio_segment
+        
+    whoosh = AudioSegment.from_file(str(sfx_path))
+    whoosh = whoosh - 20 # Reduce volume by 20dB (Micro-SFX)
+    
+    output = audio_segment
+    duration_ms = len(audio_segment)
+    
+    # Logic: Every 4 seconds (approx clip length), we need hits at +1.4 and +2.8 relative to that block.
+    # We iterate t from 0 to duration, step 4000ms
+    
+    for t in range(0, duration_ms, 4000):
+        # Hit 1: +1.4s (1400ms)
+        hit_1 = t + 1400
+        if hit_1 < duration_ms:
+            output = output.overlay(whoosh, position=hit_1)
+            
+        # Hit 2: +2.8s (2800ms)
+        hit_2 = t + 2800
+        if hit_2 < duration_ms:
+            output = output.overlay(whoosh, position=hit_2)
+            
+    return output

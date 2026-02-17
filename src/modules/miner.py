@@ -193,3 +193,84 @@ async def generate_story(topic: str) -> dict:
     except Exception as e:
         log("MINER", f"Story generation failed: {e}", "ERR")
         return None
+
+async def generate_proof_list(topic: str) -> dict:
+    """
+    Generate viral 'Proof List' script using the Luc Boulch formula.
+    Forces Gemini to output strict JSON with Hook -> 3 Proofs -> Rehook.
+    """
+    log("MINER", f"Generating Viral Proof List for: {topic}...")
+    
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    
+    prompt = f"""
+    ROLE: Viral TikTok Scripter (Retention Engineer).
+    TASK: Write a 140-word script about '{topic}' using the 'Proof List' structure.
+    
+    STRUCTURE:
+    1. Hook (0-3s): Bold, controversial, or mystery claim.
+    2. Transition: "Here are 3 reasons why..." (or similar).
+    3. Proof 1: Fast fact (Speed 1.1x).
+    4. Proof 2: Faster fact (Speed 1.15x).
+    5. Proof 3: The shocking fact.
+    6. Re-Hook: Start with "But the cherry on top is..."
+    7. Loop: End sentence that flows back to the start.
+    
+    STRICT JSON OUTPUT FORMAT:
+    {{
+      "hook": "Text of the hook",
+      "transition": "Text of transition",
+      "proof_1": "Text of proof 1",
+      "proof_2": "Text of proof 2",
+      "proof_3": "Text of proof 3",
+      "rehook": "Text of the re-hook",
+      "loop_ending": "Text of the loop ending",
+      "estimated_duration": 50,
+      "keywords_for_image_gen": ["kw1", "kw2", "kw3", "kw4", "kw5"]
+    }}
+    
+    CONSTRAINT: No intro fluff. Start immediately. Total words < 140.
+    """
+    
+    try:
+        response = await model.generate_content_async(prompt)
+        text = response.text.replace("```json", "").replace("```", "").strip()
+        data = json.loads(text)
+        log("MINER", "Proof List generated successfully.", "OK")
+        return data
+        
+    except Exception as e:
+        log("MINER", f"Proof List generation failed: {e}", "ERR")
+        return None
+
+def analyze_transcript_patterns(transcript_text: str) -> list:
+    """
+    Scan transcript for 'Enumeration Markers' to find viral listicle segments.
+    Returns list of potential start indices in the text.
+    """
+    markers = [
+        "here are three", "here are 3",
+        "number one", "first reason",
+        "three things", "3 things",
+        "top three", "top 3",
+        "reason number one",
+        "first of all",
+        "the cherry on top"
+    ]
+    
+    matches = []
+    text_lower = transcript_text.lower()
+    
+    for marker in markers:
+        idx = text_lower.find(marker)
+        if idx != -1:
+            matches.append({
+                "marker": marker,
+                "index": idx,
+                "context": transcript_text[idx:idx+50] + "..."
+            })
+            
+    if matches:
+        log("MINER", f"Found {len(matches)} viral patterns in transcript.", "INFO")
+        
+    return matches

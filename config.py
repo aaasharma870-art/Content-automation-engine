@@ -58,6 +58,7 @@ for d in [RAW_DIR, PROCESSED_DIR, TEMP_DIR, FONTS_DIR, MUSIC_DIR, BROLL_DIR, BRO
 USE_LOCAL_GENERATION = False    # Set to False to use Cloud (DALL-E/OpenAI) for stability check
 GPU_VRAM_LIMIT = 12            # GB
 SFX_DIR = ASSETS_DIR / "sfx"
+(SFX_DIR / "transitions").mkdir(parents=True, exist_ok=True)
 VOICE_MODEL_DIR = ASSETS_DIR / "models" / "rvc"
 
 # ── Whisper Configuration ────────────────────────
@@ -100,7 +101,7 @@ CAPTION_HIGHLIGHT_COLOR = "&H0000FFFF"   # Yellow highlight for active word
 CAPTION_OUTLINE_COLOR = "&H00000000"     # Black outline
 CAPTION_OUTLINE_WIDTH = 5                # Thicker outline for readability
 CAPTION_SHADOW_DEPTH = 3
-CAPTION_MARGIN_BOTTOM = 140
+CAPTION_MARGIN_BOTTOM = 200              # Increased for safety (above UI)
 CAPTION_MAX_CHARS = 15                   # Max chars on screen at once
 CAPTION_UPPERCASE = True
 
@@ -108,7 +109,7 @@ CAPTION_UPPERCASE = True
 CLIP_MODEL_NAME = "ViT-B/32"
 BROLL_SAMPLE_FRAMES = 5      # Frames to extract per b-roll clip
 BROLL_OVERLAY_DURATION = 3.0  # Seconds of b-roll to inject
-BROLL_MIN_SIMILARITY = 0.20  # Minimum CLIP cosine similarity to use B-roll
+BROLL_MIN_SIMILARITY = 0.25  # Review: Increased from 0.20 to reduce bad matches
 
 # ── Pipeline Settings ────────────────────────────
 POLL_INTERVAL_SECONDS = 30
@@ -134,6 +135,30 @@ USE_HWACCEL_CUDA = True        # CUDA-accelerated decoding (requires NVIDIA GPU)
 # ── Color Grading (LUTs) ────────────────────────
 LUT_FILE = ""                  # Place .cube file in assets/luts/, set name here
                                # e.g. "cinematic_warm.cube"
+
+# ── B-Roll Policy ──────────────────────────────
+ALLOW_BROLL_FALLBACK = True    # Allow Pexels fallback when no CLIP match exists
+PEXELS_CLIP_VERIFY = False     # True = CLIP-verify Pexels thumbnails (slower but accurate)
+
+# ── Visual Style → LUT Mapping ─────────────────
+VISUAL_STYLE_LUT_MAP = {
+    "dark": "teal_orange.cube",
+    "moody": "teal_orange.cube",
+    "cinematic": "cinematic.cube",
+    "bright": "standard_rec709.cube",
+    "vlog": "standard_rec709.cube",
+    "energetic": "vibrant.cube",
+    "luxury": "cinematic.cube",
+    "minimal": "standard_rec709.cube",
+}
+
+# ── Caption Emphasis Colors (ASS BGR format) ────
+EMPHASIS_COLOR_KEY_NOUN = "&H0000FF00"       # Green
+EMPHASIS_COLOR_KEY_ADJECTIVE = "&H0000FFFF"  # Yellow
+EMPHASIS_COLOR_NEGATIVE = "&H000000FF"       # Red
+
+# ── Audio Final Mix ────────────────────────────
+SOCIAL_LUFS = -14              # Final output loudness (TikTok/Reels/Shorts standard)
 
 # ── Dynamic Zoom ────────────────────────────────
 DYNAMIC_ZOOM_INTENSITY = 1.05  # Max zoom factor (1.0 = off, 1.05 = subtle, 1.15 = punchy)

@@ -17,7 +17,10 @@ import numpy as np
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from config import BROLL_DIR, BROLL_INDEX_DIR, BROLL_SAMPLE_FRAMES, BROLL_OVERLAY_DURATION
+from config import (
+    BROLL_DIR, BROLL_INDEX_DIR, BROLL_SAMPLE_FRAMES, BROLL_OVERLAY_DURATION,
+    PEXELS_CLIP_VERIFY, BROLL_MIN_SIMILARITY,
+)
 from src.utils.logger import log
 from src.utils.ffmpeg_utils import FFMPEG_BIN
 from src.modules.pexels_broll import search_pexels_video
@@ -196,6 +199,8 @@ def find_broll(text_query: str, top_k: int = 1, **kwargs) -> list:
             "video_path": video_path,
             "video_name": meta["video_name"],
             "similarity": float(score),
+            "source": "clip",
+            "is_fallback": False,
         })
 
     if results:
@@ -206,13 +211,69 @@ def find_broll(text_query: str, top_k: int = 1, **kwargs) -> list:
         log("BROLL", "No local match found. Trying Pexels...", "WARN")
         pexels_result = search_pexels_video(text_query, **kwargs)
         if pexels_result:
-            results.append({
-                "video_path": pexels_result["video_path"],
-                "video_name": pexels_result["video_name"],
-                "similarity": 1.0, # Artificial score for exact API match
-            })
+            # Optionally verify Pexels result with CLIP for a real similarity score
+            pexels_similarity = None
+            if PEXELS_CLIP_VERIFY:
+                pexels_similarity = _verify_pexels_clip(
+                    pexels_result["video_path"], text_query
+                )
+                if pexels_similarity is not None and pexels_similarity < BROLL_MIN_SIMILARITY:
+                    log("BROLL", f"Pexels CLIP verification failed "
+                        f"(sim: {pexels_similarity:.3f} < {BROLL_MIN_SIMILARITY})", "WARN")
+                    pexels_similarity = None  # Mark as unverified fallback
+                    pexels_result = None      # Discard poor match
+
+            if pexels_result:
+                results.append({
+                    "video_path": pexels_result["video_path"],
+                    "video_name": pexels_result["video_name"],
+                    "similarity": pexels_similarity,  # None if unverified, real score if CLIP-checked
+                    "source": "pexels",
+                    "is_fallback": pexels_similarity is None,  # Only fallback if no real score
+                })
+                src_label = f"CLIP-verified (sim: {pexels_similarity:.3f})" if pexels_similarity else "keyword-only fallback"
+                log("BROLL", f"Pexels result: {pexels_result['video_name']} ({src_label})", "OK")
 
     return results
+
+
+def _verify_pexels_clip(video_path: str, text_query: str) -> float | None:
+    """
+    Download one frame from a Pexels video and compute actual CLIP similarity
+    against the text query. Returns cosine similarity or None on failure.
+    """
+    try:
+        _ensure_clip_loaded()
+        import clip
+        import torch
+        from PIL import Image
+
+        frames = _extract_frames(video_path, 1)
+        if not frames:
+            return None
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        image = _clip_preprocess(Image.open(frames[0])).unsqueeze(0).to(device)
+        text_tokens = clip.tokenize([text_query]).to(device)
+
+        with torch.no_grad():
+            img_emb = _clip_model.encode_image(image)
+            txt_emb = _clip_model.encode_text(text_tokens)
+            img_emb = img_emb / img_emb.norm(dim=-1, keepdim=True)
+            txt_emb = txt_emb / txt_emb.norm(dim=-1, keepdim=True)
+            similarity = (img_emb @ txt_emb.T).item()
+
+        # Clean up temp frame
+        try:
+            os.remove(frames[0])
+        except OSError:
+            pass
+
+        log("BROLL", f"Pexels CLIP score: {similarity:.3f}", "DEBUG")
+        return float(similarity)
+    except Exception as e:
+        log("BROLL", f"Pexels CLIP verification failed: {e}", "WARN")
+        return None
 
 
 def build_broll_ffmpeg_cmd(

@@ -1,0 +1,37 @@
+
+def _gameplay_result(source_w, source_h, duration):
+    """
+    Returns a static center crop that FILLS the 9:16 screen.
+    Useful for Minecraft, Subway Surfers, etc.
+    """
+    # Target 9:16 aspect ratio
+    target_aspect = 9 / 16
+    
+    # We want to crop a 9:16 area from the center of the source
+    # If source is 16:9 (1920x1080), we crop a 608x1080 patch?
+    # No, usually we want to zoom in. 
+    # But cropping a vertical slice from horizontal video loses a lot.
+    # Standard "Gameplay Shorts" usually stack 2 videos or just crop center.
+    
+    # Let's assume we crop the center 9:16 region.
+    # Height is full height. Width is height * (9/16).
+    crop_h = source_h
+    crop_w = int(crop_h * target_aspect)
+    
+    # If crop_w > source_w (impossible for landscape), we clamp
+    if crop_w > source_w:
+        crop_w = source_w
+        crop_h = int(crop_w / target_aspect)
+        
+    # Center it
+    x = (source_w - crop_w) // 2
+    
+    # Return a static crop for the whole duration
+    return {
+        "mode": "gameplay",
+        "crop_data": [(0, x)], # Static X
+        "crop_w": crop_w,
+        "crop_h": crop_h,
+        "source_w": source_w,
+        "source_h": source_h
+    }

@@ -144,12 +144,17 @@ def download_video(url: str) -> dict:
 
     log("INGEST", f"Downloaded: {actual_video.name}", "OK")
 
+    # ── Step 4: Calculate Motion Score (CV signal for Brain) ─
+    motion_score = _calculate_motion_score(str(actual_video))
+    log("INGEST", f"Motion score: {motion_score}", "OK")
+
     return {
         "video_path": str(actual_video),
         "audio_wav_path": str(wav_path) if wav_path and wav_path.exists() else None,
         "title": title,
         "work_dir": str(work_dir),
         "metadata": metadata,
+        "motion_score": motion_score,
     }
 
 
@@ -187,3 +192,64 @@ def _find_audio_file(directory: Path) -> Path | None:
         for f in sorted(directory.glob(ext), key=lambda x: x.stat().st_size, reverse=True):
             return f
     return None
+
+
+def _calculate_motion_score(video_path: str, sample_count: int = 30) -> str:
+    """
+    Calculate average inter-frame pixel delta to classify visual dynamism.
+    Used by the Brain to penalize visually static segments.
+
+    Args:
+        video_path: Path to the video file
+        sample_count: Number of evenly-spaced frames to compare
+
+    Returns:
+        "low" (static/podcast), "medium" (casual vlog), or "high" (dynamic action)
+    """
+    try:
+        import cv2
+        import numpy as np
+
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            log("INGEST", "Could not open video for motion analysis", "WARN")
+            return "unknown"
+
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total_frames < 2:
+            cap.release()
+            return "unknown"
+
+        step = max(1, total_frames // sample_count)
+        deltas = []
+        prev_gray = None
+
+        for i in range(0, min(total_frames, step * sample_count), step):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, i)
+            ret, frame = cap.read()
+            if not ret:
+                break
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            if prev_gray is not None:
+                delta = float(np.mean(np.abs(gray.astype(float) - prev_gray.astype(float))))
+                deltas.append(delta)
+            prev_gray = gray
+
+        cap.release()
+
+        if not deltas:
+            return "unknown"
+
+        avg_delta = float(np.mean(deltas))
+        if avg_delta < 5:
+            return "low"
+        elif avg_delta < 15:
+            return "medium"
+        else:
+            return "high"
+    except ImportError:
+        log("INGEST", "OpenCV not available for motion analysis", "WARN")
+        return "unknown"
+    except Exception as e:
+        log("INGEST", f"Motion analysis failed: {e}", "WARN")
+        return "unknown"

@@ -163,19 +163,35 @@ def analyze_scene(video_path: str, start: float, end: float,
     if layout_type == "screen_share":
         cap.release()
         log("DIRECTOR", "Screen Share → Letterbox+Blur", "OK")
+        # Just center the video, maybe blur background
         return _screen_result(total_frames, source_w, source_h, fps)
 
+    if layout_type == "gameplay":
+        cap.release()
+        log("DIRECTOR", "Gameplay → Center Crop", "OK")
+        # Center crop 9:16 (Zoomed in to fill screen)
+        # This is better for Minecraft/Gameplay than screen_share (which adds black bars/blur)
+        return _gameplay_result(total_frames, source_w, source_h, fps)
+
     # ── Face Mode ──────────────────────────────
-    crop_data, multi_speaker_spread = _analyze_faces(
+    crop_data, multi_speaker_spread, face_x_coords = _analyze_faces(
         cap, start_frame, end_frame, source_w, source_h, fps
     )
     cap.release()
 
-    # Fallback: if no faces OR faces spread too wide → letterbox
+    # Fallback: if no faces OR faces spread too wide
     if not crop_data or multi_speaker_spread:
         reason = "faces spread too wide" if multi_speaker_spread else "no faces detected"
-        log("DIRECTOR", f"Fallback → Letterbox+Blur ({reason})", "WARN")
-        return _screen_result(total_frames, source_w, source_h, fps)
+        if multi_speaker_spread and face_x_coords:
+            # K-Means detected 2 distinct speaker positions → split-screen
+            log("DIRECTOR", "Multiple speakers detected → Split Screen", "OK")
+            return _split_screen_result(face_x_coords, total_frames, source_w, source_h, fps)
+        elif not crop_data and layout_type != "screen_share":
+            log("DIRECTOR", "No faces detected. Falling back to Gameplay (Center Crop).", "WARN")
+            return _gameplay_result(total_frames, source_w, source_h, fps)
+        else:
+            log("DIRECTOR", f"Fallback → Letterbox+Blur ({reason})", "WARN")
+            return _screen_result(total_frames, source_w, source_h, fps)
 
     log("DIRECTOR", f"Face tracking: {len(crop_data)} keyframes", "OK")
     return {
@@ -185,6 +201,62 @@ def analyze_scene(video_path: str, start: float, end: float,
         "source_width": source_w,
         "source_height": source_h,
         "fps": fps,
+    }
+
+
+
+def _gameplay_result(total_frames, source_w, source_h, fps):
+    """
+    Returns a static center crop that FILLS the 9:16 screen.
+    Useful for Minecraft, Subway Surfers, etc.
+    """
+    # Target 9:16 aspect ratio
+    target_aspect = 9 / 16
+    
+    # We want to crop a 9:16 area from the center of the source
+    # If source is 16:9 (1920x1080), we crop a 608x1080 patch?
+    # No, usually we want to zoom in to fill height, then crop width.
+    # OR if source is landscape, we want to crop the center to 9:16.
+    
+    # Example: 1920x1080 source.
+    # We want final 1080x1920? No, that's upscaling.
+    # We want to crop a 9:16 region.
+    # If we keep full height 1080, width would be 1080 * (9/16) = 607.5.
+    # Then we scale 607x1080 up to 1080x1920.
+    
+    crop_h = source_h
+    crop_w = int(crop_h * target_aspect)
+    
+    # Clamp just in case
+    if crop_w > source_w:
+        crop_w = source_w
+        crop_h = int(crop_w / target_aspect)
+        
+    start_x = (source_w - crop_w) // 2
+    
+    # Create static crop data for all frames
+    # Format: [(frame_idx, center_x), ...]
+    # Director expects center_x.
+    center_x = source_w // 2
+    
+    # But wait, director returns "crop_data" which is a list of (frame, center_x).
+    # The Editor uses this to build the crop filter.
+    # Editor logic: crop=crop_w:crop_h:(center_x - crop_w/2):0
+    
+    # So we just need to return center_x for every frame.
+    
+    # Opt: Just return 2 keyframes (start, end) and let interpolation handle it?
+    # Or just one point? _interpolate_crop_path handles it.
+    
+    return {
+        "mode": "gameplay",
+        "crop_data": [(0, center_x), (total_frames, center_x)],
+        "frame_count": total_frames,
+        "source_width": source_w,
+        "source_height": source_h,
+        "fps": fps,
+        "crop_w": crop_w,
+        "crop_h": crop_h
     }
 
 
@@ -209,7 +281,8 @@ def _analyze_faces(cap, start_frame, end_frame, source_w, source_h, fps):
     crop_w = int(source_h * (9 / 16))
 
     raw_points = []
-    spread_count = 0 
+    all_face_x_coords = []  # Collect all face X positions for K-Means split-screen detection
+    spread_count = 0
     total_analyzed = 0
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
@@ -262,13 +335,16 @@ def _analyze_faces(cap, start_frame, end_frame, source_w, source_h, fps):
                         lip_open = speaker_det.get_lip_openness(face_lm, source_h)
                         xs = [lm.x for lm in face_lm.landmark]
                         face_width = (max(xs) - min(xs)) * source_w
-                        
+
                         faces_data.append({
                             "id": i,
                             "center_x": center_x,
                             "lip_openness": lip_open,
                             "width": face_width
                         })
+
+                        # Collect face X positions for split-screen analysis
+                        all_face_x_coords.append(center_x)
 
                     # Active Speaker Logic
                     active = speaker_det.update_and_pick(faces_data)
@@ -284,9 +360,11 @@ def _analyze_faces(cap, start_frame, end_frame, source_w, source_h, fps):
                     max_area = 0
                     for (x, y, w, h) in faces:
                         area = w * h
+                        face_cx = x + w // 2
+                        all_face_x_coords.append(face_cx)
                         if area > max_area:
                             max_area = area
-                            best_cx = x + w // 2
+                            best_cx = face_cx
 
             # Kalman Update
             if best_cx is not None:
@@ -305,7 +383,10 @@ def _analyze_faces(cap, start_frame, end_frame, source_w, source_h, fps):
 
     # Post-process: interpolate gaps
     full_path = _interpolate_crop_path(raw_points, end_frame - start_frame)
-    return full_path, False
+
+    # Detect multi-speaker spread using K-Means clustering
+    multi_spread = _should_split_screen(all_face_x_coords, source_w)
+    return full_path, multi_spread, all_face_x_coords
 
 
 def _interpolate_crop_path(keyframes: list, total_frames: int) -> list:
@@ -320,6 +401,79 @@ def _interpolate_crop_path(keyframes: list, total_frames: int) -> list:
     all_idx = list(range(total_frames))
     interp = np.interp(all_idx, kf_idx, kf_val)
     return [(i, int(x)) for i, x in zip(all_idx, interp)]
+
+
+def _should_split_screen(face_x_coords: list, frame_width: int) -> bool:
+    """
+    Use 1D K-Means clustering to detect 2 distinct speaker positions.
+    Only triggers split-screen when:
+    - Cluster centers are separated by >30% of frame width
+    - Each cluster has low internal spread (speakers staying in their lanes)
+    """
+    if len(face_x_coords) < 20:
+        return False
+
+    try:
+        from sklearn.cluster import KMeans
+
+        X = np.array(face_x_coords).reshape(-1, 1)
+        kmeans = KMeans(n_clusters=2, n_init=10, random_state=42).fit(X)
+        centers = sorted(kmeans.cluster_centers_.flatten())
+
+        distance = centers[1] - centers[0]
+        normalized_dist = distance / frame_width
+
+        # Check that each cluster has low spread (speakers aren't wandering)
+        cluster_stds = []
+        for label in [0, 1]:
+            cluster_points = X[kmeans.labels_ == label]
+            if len(cluster_points) > 0:
+                cluster_stds.append(float(np.std(cluster_points)))
+            else:
+                return False  # Empty cluster = not 2 real speakers
+
+        avg_std = np.mean(cluster_stds)
+
+        # Criteria: separated by >30% AND each speaker stays in their lane (<15% std)
+        is_split = normalized_dist > 0.30 and avg_std < frame_width * 0.15
+        if is_split:
+            log("DIRECTOR", f"K-Means: 2 speakers detected (sep={normalized_dist:.2f}, std={avg_std:.0f})")
+        return is_split
+
+    except ImportError:
+        log("DIRECTOR", "scikit-learn not available for split-screen detection", "WARN")
+        return False
+    except Exception as e:
+        log("DIRECTOR", f"Split-screen detection failed: {e}", "WARN")
+        return False
+
+
+def _split_screen_result(face_x_coords: list, total_frames, source_w, source_h, fps):
+    """
+    Build split-screen result with two face center positions from K-Means clusters.
+    """
+    try:
+        from sklearn.cluster import KMeans
+
+        X = np.array(face_x_coords).reshape(-1, 1)
+        kmeans = KMeans(n_clusters=2, n_init=10, random_state=42).fit(X)
+        centers = sorted(kmeans.cluster_centers_.flatten())
+        left_center = int(centers[0])
+        right_center = int(centers[1])
+    except Exception:
+        # Fallback: divide into thirds
+        left_center = source_w // 3
+        right_center = 2 * source_w // 3
+
+    return {
+        "mode": "split_screen",
+        "face_centers": [left_center, right_center],
+        "crop_data": [],
+        "frame_count": total_frames,
+        "source_width": source_w,
+        "source_height": source_h,
+        "fps": fps,
+    }
 
 
 def get_screen_layout_filter(source_w: int, source_h: int) -> str:

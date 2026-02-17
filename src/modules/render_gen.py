@@ -6,6 +6,10 @@ from pathlib import Path
 from modules.utils import log, get_ffmpeg_bin
 from config import USE_NVENC, TARGET_WIDTH, TARGET_HEIGHT, FFMPEG_THREADS, OUTPUT_DIR
 
+def _escape_path(path: str) -> str:
+    """Escape file path for use in FFmpeg filter expressions (Windows backslashes + colons)."""
+    return str(path).replace("\\", "/").replace(":", "\\:")
+
 VIDEO_ENCODER = "h264_nvenc" if USE_NVENC else "libx264"
 
 def build_video(mode: str, assets: dict) -> str:
@@ -101,25 +105,32 @@ def _create_slideshow(images: list, duration: float) -> str:
     
     is_video_input = str(images[0]).endswith(".mp4")
     
-    # CASE A: Video Loops (SVD)
+    # CASE A: Video Loops (SVD) or Repurposed Clips
     if is_video_input:
-        # Create a concat demuxer file
-        concat_list_path = OUTPUT_DIR / "concat_list.txt"
-        with open(concat_list_path, "w") as f:
-            for vid in images:
-                f.write(f"file '{str(vid).replace(os.sep, '/')}'\n")
+        # Create complex filter graph to apply Flash Cuts per clip
+        inputs = []
+        filter_parts = []
+        
+        for i, vid in enumerate(images):
+            inputs.extend(["-i", str(vid)])
+            # Apply randomized Flash Cut
+            # Duration must be known? Flash cut logic uses 'time' so it's consistent.
+            # We assume clip is ~4s.
+            filter_parts.append(_create_flash_cut_filter(f"{i}:v", duration=4.0) + f"[v{i}];")
+            
+        # Concat all [vN] streams
+        concat_str = "".join([f"[v{i}]" for i in range(len(images))])
+        filter_str = "".join(filter_parts) + f"{concat_str}concat=n={len(images)}:v=1:a=0[outv]"
         
         output_path = str(OUTPUT_DIR / "temp_slideshow.mp4")
         
-        # Concat the video clips. 
-        # SVD clips are usually slow 7fps. We might want to interpolate or just concat.
-        # Simple concat:
         cmd = [
             get_ffmpeg_bin(), "-y", "-hide_banner",
-            "-f", "concat", "-safe", "0", "-i", str(concat_list_path),
-            "-filter_complex", f"[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[outv]",
+            *inputs,
+            "-filter_complex", filter_str,
             "-map", "[outv]",
             "-c:v", VIDEO_ENCODER,
+            "-preset", "fast",
             output_path
         ]
         subprocess.run(cmd, check=True)
@@ -180,6 +191,52 @@ def _create_slideshow(images: list, duration: float) -> str:
     
     subprocess.run(cmd, check=True)
     return output_path
+
+def _create_flash_cut_filter(stream_label, duration=4.0):
+    """
+    Generate randomized 'Flash Cut' filter for video clips.
+    Uses scale+crop with animated expressions (NOT zoompan, which is image-only).
+    Patterns:
+    A: Standard (Wide -> Zoom -> Pan)
+    B: Impact (Zoom In -> Pull Back)
+    C: Chaos (Step Zooms)
+    """
+    import random
+    
+    patterns = ["A", "B", "C"]
+    choice = random.choice(patterns)
+    
+    # For video inputs: scale UP first, then use animated crop to simulate zoom/pan.
+    # Scale to 1.5x the target (1620x2880), then crop 1080x1920 with moving offsets.
+    
+    sw = int(1080 * 1.5)  # 1620
+    sh = int(1920 * 1.5)  # 2880
+    tw = 1080
+    th = 1920
+    
+    # max offset: sw - tw = 540, sh - th = 960
+    # 't' = time in seconds in FFmpeg expressions
+    
+    # Pattern A: Start centered, then pan right over time
+    if choice == "A":
+        x_expr = f"min(t*50,{sw - tw})"  # Pan right slowly
+        y_expr = f"{(sh - th) // 2}"     # Center vertically
+        
+    # Pattern B: Start zoomed (top-left crop), drift to center
+    elif choice == "B":
+        x_expr = f"min(t*30,{(sw - tw) // 2})"
+        y_expr = f"min(t*50,{(sh - th) // 2})"
+        
+    # Pattern C: Oscillate (bounce)
+    else:
+        x_expr = f"({(sw - tw) // 2})*(1+sin(t*3))/2"
+        y_expr = f"({(sh - th) // 2})*(1+cos(t*2))/2"
+    
+    return (
+        f"[{stream_label}]scale={sw}:{sh}:force_original_aspect_ratio=disable,"
+        f"crop={tw}:{th}:{x_expr}:{y_expr},"
+        f"setsar=1,format=yuv420p"
+    )
 
 def _get_duration(file_path):
     cmd = [get_ffmpeg_bin(), "-i", file_path]

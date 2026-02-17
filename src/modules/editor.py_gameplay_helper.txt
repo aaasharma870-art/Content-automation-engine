@@ -1,0 +1,28 @@
+
+def _build_gameplay_filter(scene_data, source_w, source_h, ass_path):
+    """
+    Simple Center Crop filter for Gameplay mode.
+    Scales the center 9:16 crop to fill the target resolution.
+    """
+    # We used Director to calculate crop_w/h, but it might just be easier to calc here.
+    # Director passed "crop_w" and "crop_h" in scene_data if we added it there.
+    # Let's verify what we added in director.py
+    
+    target_aspect = 9 / 16
+    crop_h = source_h
+    crop_w = int(crop_h * target_aspect)
+    
+    if crop_w > source_w:
+        crop_w = source_w
+        crop_h = int(crop_w / target_aspect)
+        
+    x = "(iw-ow)/2"
+    y = "(ih-oh)/2"
+    
+    ass_escaped = _escape_path(ass_path)
+    
+    return (
+        f"[0:v]crop={crop_w}:{crop_h}:{x}:{y},"
+        f"scale={TARGET_WIDTH}:{TARGET_HEIGHT},"
+        f"ass='{ass_escaped}'[vout]"
+    )
