@@ -1,0 +1,277 @@
+﻿python : [mp3 @ 
+0000024d3ac6fd80] 
+Estimating duration 
+from bitrate, this may 
+be inaccurate
+At line:1 char:1
++ python src/pipelines/
+reddit.py --background 
+assets/persistent/gamep
+la ...
++ ~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~
+    + CategoryInfo     
+         : 
+NotSpecified:     
+([mp3 @ 0000024d...y   
+  be inaccurate:Strin  
+  g) [], RemoteExcepti 
+   on
+    + 
+FullyQualifiedErro    
+rId : NativeCommandE   
+ rror
+ 
+Input #0, mp3, from 'C:
+\Users\aaash\.gemini\an
+tigravity\scratch\.auto
+mation\data\processed\r
+eddit_audio.temp.mp3':
+  Duration: 
+00:01:10.63, start: 
+0.000000, bitrate: 48 
+kb/s
+  Stream #0:0: Audio: 
+mp3 (mp3float), 24000 
+Hz, mono, fltp, 48 kb/s
+Stream mapping:
+  Stream #0:0 -> #0:0 
+(mp3 (mp3float) -> mp3 
+(libmp3lame))
+Press [q] to stop, [?] 
+for help
+Output #0, mp3, to 'C:\
+Users\aaash\.gemini\ant
+igravity\scratch\.autom
+ation\data\processed\re
+ddit_audio.mp3':
+  Metadata:
+    TSSE            : 
+Lavf61.7.100
+  Stream #0:0: Audio: 
+mp3, 48000 Hz, mono, 
+fltp
+      Metadata:
+        encoder        
+ : Lavc61.19.100 
+libmp3lame
+size=     256KiB 
+time=00:00:38.66 
+bitrate=  54.2kbits/s 
+speed=75.3x    
+[out#0/mp3 @ 
+0000024d3ac70240] 
+video:0KiB 
+audio:683KiB 
+subtitle:0KiB other 
+streams:0KiB global 
+headers:0KiB muxing 
+overhead: 0.033752%
+size=     683KiB 
+time=00:01:03.80 
+bitrate=  87.7kbits/s 
+speed=75.5x    
+ffmpeg version 7.1-esse
+ntials_build-www.gyan.d
+ev Copyright (c) 
+2000-2024 the FFmpeg 
+developers
+  built with gcc 
+14.2.0 (Rev1, Built by 
+MSYS2 project)
+  configuration: 
+--enable-gpl 
+--enable-version3 
+--enable-static 
+--disable-w32threads 
+--disable-autodetect 
+--enable-fontconfig 
+--enable-iconv 
+--enable-gnutls 
+--enable-libxml2 
+--enable-gmp 
+--enable-bzlib 
+--enable-lzma 
+--enable-zlib 
+--enable-libsrt 
+--enable-libssh 
+--enable-libzmq 
+--enable-avisynth 
+--enable-sdl2 
+--enable-libwebp 
+--enable-libx264 
+--enable-libx265 
+--enable-libxvid 
+--enable-libaom 
+--enable-libopenjpeg 
+--enable-libvpx --enabl
+e-mediafoundation 
+--enable-libass 
+--enable-libfreetype 
+--enable-libfribidi 
+--enable-libharfbuzz 
+--enable-libvidstab 
+--enable-libvmaf 
+--enable-libzimg 
+--enable-amf 
+--enable-cuda-llvm 
+--enable-cuvid 
+--enable-dxva2 
+--enable-d3d11va 
+--enable-d3d12va 
+--enable-ffnvcodec 
+--enable-libvpl 
+--enable-nvdec 
+--enable-nvenc 
+--enable-vaapi 
+--enable-libgme 
+--enable-libopenmpt --e
+nable-libopencore-amrwb
+ --enable-libmp3lame 
+--enable-libtheora --en
+able-libvo-amrwbenc 
+--enable-libgsm --enabl
+e-libopencore-amrnb 
+--enable-libopus 
+--enable-libspeex 
+--enable-libvorbis 
+--enable-librubberband
+  libavutil      59. 
+39.100 / 59. 39.100
+  libavcodec     61. 
+19.100 / 61. 19.100
+  libavformat    61.  
+7.100 / 61.  7.100
+  libavdevice    61.  
+3.100 / 61.  3.100
+  libavfilter    10.  
+4.100 / 10.  4.100
+  libswscale      8.  
+3.100 /  8.  3.100
+  libswresample   5.  
+3.100 /  5.  3.100
+  libpostproc    58.  
+3.100 / 58.  3.100
+[concat @ 
+00000228732b4e00] 
+Impossible to open 'C:\
+Users\aaash\AppData\Loc
+al\Temp\assets/persiste
+nt/gameplay/1.mp4'
+[in#0 @ 
+00000228732b4a00] 
+Error opening input: 
+No such file or 
+directory
+Error opening input 
+file C:\Users\aaash\App
+Data\Local\Temp\tmp_t43
+7g99.txt.
+Error opening input 
+files: No such file or 
+directory
+Traceback (most recent 
+call last):
+  File "C:\Users\aaash\
+.gemini\antigravity\scr
+atch\.automation\src\pi
+pelines\reddit.py", 
+line 327, in <module>
+    asyncio.run(build_r
+eddit_video(args.backgr
+ound, args.subreddit))
+  File "C:\Program File
+s\WindowsApps\PythonSof
+twareFoundation.Python.
+3.11_3.11.2544.0_x64__q
+bz5n2kfra8p0\Lib\asynci
+o\runners.py", line 
+190, in run
+    return 
+runner.run(main)
+           
+^^^^^^^^^^^^^^^^
+  File "C:\Program File
+s\WindowsApps\PythonSof
+twareFoundation.Python.
+3.11_3.11.2544.0_x64__q
+bz5n2kfra8p0\Lib\asynci
+o\runners.py", line 
+118, in run
+    return self._loop.r
+un_until_complete(task)
+           ^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program File
+s\WindowsApps\PythonSof
+twareFoundation.Python.
+3.11_3.11.2544.0_x64__q
+bz5n2kfra8p0\Lib\asynci
+o\base_events.py", 
+line 654, in 
+run_until_complete
+    return 
+future.result()
+           
+^^^^^^^^^^^^^^^
+  File "C:\Users\aaash\
+.gemini\antigravity\scr
+atch\.automation\src\pi
+pelines\reddit.py", 
+line 259, in 
+build_reddit_video
+    
+prepared_background = _
+prepare_dynamic_backgro
+und(background_video, 
+audio_duration)
+                       
+   ^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^
+  File "C:\Users\aaash\
+.gemini\antigravity\scr
+atch\.automation\src\pi
+pelines\reddit.py", 
+line 95, in _prepare_dy
+namic_background
+    
+subprocess.run(cmd, 
+check=True)
+  File "C:\Program File
+s\WindowsApps\PythonSof
+twareFoundation.Python.
+3.11_3.11.2544.0_x64__q
+bz5n2kfra8p0\Lib\subpro
+cess.py", line 571, in 
+run
+    raise CalledProcess
+Error(retcode, 
+process.args,
+subprocess.CalledProces
+sError: Command '['C:\\
+Users\\aaash\\AppData\\
+Local\\Packages\\Python
+SoftwareFoundation.Pyth
+on.3.11_qbz5n2kfra8p0\\
+LocalCache\\local-packa
+ges\\Python311\\site-pa
+ckages\\imageio_ffmpeg\
+\binaries\\ffmpeg-win-x
+86_64-v7.1.exe', '-y', 
+'-f', 'concat', 
+'-safe', '0', '-i', 'C:
+\\Users\\aaash\\AppData
+\\Local\\Temp\\tmp_t437
+g99.txt', '-c:v', 
+'libx264', '-preset', 
+'ultrafast', '-crf', 
+'23', 'C:\\Users\\aaash
+\\.gemini\\antigravity\
+\scratch\\.automation\\
+data\\processed\\temp_b
+ackground_concat.mp4']'
+ returned non-zero 
+exit status 4294967294.

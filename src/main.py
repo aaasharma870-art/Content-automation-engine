@@ -11,7 +11,7 @@ SRC_DIR = Path(__file__).resolve().parent
 sys.path.append(str(ROOT_DIR))
 sys.path.append(str(SRC_DIR))
 
-from modules.utils import log, get_ffmpeg_bin
+from src.modules.utils import log, get_ffmpeg_bin
 
 
 LOGO = r"""
@@ -56,21 +56,34 @@ async def main():
         print("\nChoose Mode:")
         print("  [1] Repurpose Video (URL -> Clips)")
         print("  [2] Generate New (Topic -> AI Video)")
+        print("  [3] Reddit Story (Scrape Story -> TTS Overlay)")
         print("  [q] Quit")
-        
+
         choice = input("Select > ").strip().lower()
-        
+
         if choice == 'q':
             break
-            
+
         if choice == '1':
             from pipelines import repurpose
             await repurpose.run_pipeline()
-            
+
         elif choice == '2':
             from pipelines import generate
             await generate.run_pipeline()
-            
+
+        elif choice == '3':
+            from pipelines import reddit
+            print("\n" + "="*50)
+            print("REDDIT STORY MODE")
+            print("="*50)
+            bg_path = input("Background video path (e.g., gameplay.mp4): ").strip()
+            if not Path(bg_path).exists():
+                print(f"{Fore.RED}ERROR: File not found: {bg_path}{Style.RESET_ALL}")
+                continue
+            subreddit = input("Subreddit (default: TrueOffMyChest): ").strip() or "TrueOffMyChest"
+            await reddit.build_reddit_video(bg_path, subreddit)
+
         else:
             print("Invalid choice.")
 

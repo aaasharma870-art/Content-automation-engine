@@ -94,7 +94,10 @@ def normalize_audio(input_path: str, output_path: str) -> str:
 
 
 def remove_silence(input_path: str, output_path: str) -> str:
-    """Truncate silence gaps >500ms for jump-cut pacing."""
+    """
+    Truncate silence gaps >500ms for jump-cut pacing.
+    Also removes leading/trailing silence for perfect YouTube Shorts loopability.
+    """
     log("EDITOR", f"Removing silence (>{SILENCE_MIN_DURATION_MS}ms)...")
 
     silence_dur = SILENCE_MIN_DURATION_MS / 1000.0
@@ -102,9 +105,20 @@ def remove_silence(input_path: str, output_path: str) -> str:
         FFMPEG_BIN, "-y", "-i", input_path, "-hide_banner",
         "-af", (
             f"silenceremove="
+            # Remove leading silence
+            f"start_periods=1:"
+            f"start_duration=0.1:"
+            f"start_threshold={SILENCE_THRESHOLD_DB}dB:"
+            # Remove middle silence gaps
             f"stop_periods=-1:"
             f"stop_duration={silence_dur}:"
-            f"stop_threshold={SILENCE_THRESHOLD_DB}dB"
+            f"stop_threshold={SILENCE_THRESHOLD_DB}dB,"
+            # Remove trailing silence (critical for loopability)
+            f"areverse,silenceremove="
+            f"start_periods=1:"
+            f"start_duration=0.1:"
+            f"start_threshold={SILENCE_THRESHOLD_DB}dB,"
+            f"areverse"
         ),
         "-c:a", "aac", "-b:a", "192k",
         output_path,
@@ -115,128 +129,68 @@ def remove_silence(input_path: str, output_path: str) -> str:
         log("EDITOR", "Silence removal failed, using original", "WARN")
         shutil.copy2(input_path, output_path)
     else:
-        log("EDITOR", "Silence removed", "OK")
+        log("EDITOR", "Silence removed (including tail for loopability)", "OK")
 
     return output_path
 
 
-def select_background_music(voice_path: str = None) -> str | None:
+def select_background_music(visual_style: str = None, duration: float = 60.0, voice_path: str = None) -> str | None:
     """
-    Select background music by matching acoustic features (tempo, mood, intensity).
-    Uses a cached index (music_index.json) to avoid re-analyzing music library.
-    """
-    music_files = []
-    for ext in ["*.mp3", "*.wav", "*.m4a", "*.ogg", "*.flac"]:
-        music_files.extend(MUSIC_DIR.glob(ext))
+    Select background music matching visual style.
 
-    if not music_files:
-        log("EDITOR", "No music files in assets/music/", "WARN")
+    Uses subdirectory structure for style-based selection:
+    - assets/music/cinematic/ → "dark", "moody", "luxury"
+    - assets/music/upbeat/ → "energetic", "bright"
+    - assets/music/neutral/ → "vlog", "minimal"
+
+    Args:
+        visual_style: Style keyword from Brain (e.g., "dark moody", "bright energetic")
+        duration: Target duration (unused, kept for compatibility)
+        voice_path: Legacy parameter (unused, kept for compatibility)
+
+    Returns:
+        Path to selected music file, or None if no music available
+    """
+
+    # Map visual_style keywords to music subdirectories
+    style_map = {
+        "dark": "cinematic", "moody": "cinematic", "luxury": "cinematic", "cinematic": "cinematic",
+        "energetic": "upbeat", "bright": "upbeat", "vibrant": "upbeat",
+        "vlog": "neutral", "minimal": "neutral", "casual": "neutral",
+    }
+
+    subdir = "neutral"  # Default fallback
+    if visual_style:
+        style_lower = visual_style.lower()
+        for keyword, folder in style_map.items():
+            if keyword in style_lower:
+                subdir = folder
+                break
+
+    # Try subdirectory first
+    music_path = MUSIC_DIR / subdir
+    if not music_path.exists():
+        log("EDITOR", f"Music subdirectory '{subdir}' not found, falling back to root", "WARN")
+        music_path = MUSIC_DIR  # Fallback to root directory
+
+    # Find all music files
+    candidates = []
+    for ext in ["*.mp3", "*.wav", "*.m4a", "*.ogg", "*.flac"]:
+        candidates.extend(music_path.glob(ext))
+
+    # If subdirectory is empty, try root
+    if not candidates and music_path != MUSIC_DIR:
+        log("EDITOR", f"No music in '{subdir}/', trying root directory", "WARN")
+        for ext in ["*.mp3", "*.wav", "*.m4a", "*.ogg", "*.flac"]:
+            candidates.extend(MUSIC_DIR.glob(ext))
+
+    if not candidates:
+        log("EDITOR", "No music files found in assets/music/", "WARN")
         return None
 
-    if not voice_path:
-        return str(random.choice(music_files))
-
-    # ── 1. Analyze Voice Track (Reference) ──
-    try:
-        import librosa
-        import numpy as np
-        
-        # Load 30s of voice
-        y_voice, sr = librosa.load(voice_path, sr=22050, duration=30)
-        
-        # Extract Features
-        # 1. Energy (RMS) - Intensity
-        rms_voice = float(np.mean(librosa.feature.rms(y=y_voice)))
-        # 2. Spectral Centroid - Brightness
-        cent_voice = float(np.mean(librosa.feature.spectral_centroid(y=y_voice, sr=sr)))
-        # 3. Spectral Contrast - Emotional tension
-        # (mean of the 4th band, roughly 200-400Hz, good for voice warmth)
-        contrast_voice = float(np.mean(librosa.feature.spectral_contrast(y=y_voice, sr=sr)[3]))
-        # 4. Tempo (BPM) - Pacing
-        onset_env = librosa.onset.onset_strength(y=y_voice, sr=sr)
-        tempo_voice = librosa.beat.tempo(onset_envelope=onset_env, sr=sr)
-        tempo_voice = float(tempo_voice[0] if isinstance(tempo_voice, np.ndarray) else tempo_voice)
-
-        log("EDITOR", f"Voice Profile: BPM={tempo_voice:.0f}, Energy={rms_voice:.3f}, Contrast={contrast_voice:.1f}")
-
-    except Exception as e:
-        log("EDITOR", f"Voice analysis failed: {e}", "WARN")
-        return str(random.choice(music_files))
-
-    # ── 2. Load/Build Music Index ──
-    index_path = MUSIC_DIR / "music_index.json"
-    music_index = {}
-    if index_path.exists():
-        try:
-            with open(index_path, "r") as f:
-                music_index = json.load(f)
-        except Exception:
-            pass
-
-    # Update index for new files
-    updated = False
-    valid_files = []
-    
-    for mf in music_files:
-        if mf.name not in music_index:
-            try:
-                log("EDITOR", f"Analyzing new track: {mf.name}...")
-                y_m, sr_m = librosa.load(str(mf), sr=22050, duration=30)
-                
-                # Extract same features
-                rms_m = float(np.mean(librosa.feature.rms(y=y_m)))
-                cent_m = float(np.mean(librosa.feature.spectral_centroid(y=y_m, sr=sr_m)))
-                contrast_m = float(np.mean(librosa.feature.spectral_contrast(y=y_m, sr=sr_m)[3]))
-                onset_m = librosa.onset.onset_strength(y=y_m, sr=sr_m)
-                tempo_m = librosa.beat.tempo(onset_envelope=onset_m, sr=sr_m)
-                tempo_m = float(tempo_m[0] if isinstance(tempo_m, np.ndarray) else tempo_m)
-                
-                music_index[mf.name] = {
-                    "rms": rms_m,
-                    "centroid": cent_m,
-                    "contrast": contrast_m,
-                    "tempo": tempo_m
-                }
-                updated = True
-            except Exception as e:
-                log("EDITOR", f"Failed to analyze {mf.name}: {e}", "WARN")
-                continue
-        
-        valid_files.append(mf)
-
-    if updated:
-        with open(index_path, "w") as f:
-            json.dump(music_index, f, indent=2)
-
-    # ── 3. Find Best Match (Weighted Euclidean Distance) ──
-    best_match = None
-    best_dist = float('inf')
-
-    # Weights: Tempo (40%), Energy (30%), Contrast (30%)
-    # Normalize differences roughly to 0-1 range before weighting
-    
-    for mf in valid_files:
-        data = music_index.get(mf.name)
-        if not data:
-            continue
-            
-        # Delta features
-        d_tempo = abs(data["tempo"] - tempo_voice) / 200.0  # Normalize by ~200 BPM range
-        d_rms = abs(data["rms"] - rms_voice) / 0.5          # Normalize by ~0.5 RMS range
-        d_contrast = abs(data["contrast"] - contrast_voice) / 30.0
-        
-        # Composite distance
-        dist = (d_tempo * 0.4) + (d_rms * 0.3) + (d_contrast * 0.3)
-        
-        if dist < best_dist:
-            best_dist = dist
-            best_match = mf
-
-    if best_match:
-        log("EDITOR", f"Mood Match: {best_match.name} (dist={best_dist:.3f})", "OK")
-        return str(best_match)
-    
-    return str(random.choice(music_files))
+    selected = str(random.choice(candidates))
+    log("EDITOR", f"Music selected: {Path(selected).name} (style: {visual_style or 'default'})", "OK")
+    return selected
 
 
 def build_sidechain_audio(voice_path: str, music_path: str, output_path: str,
@@ -442,7 +396,17 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     lines = _group_words_smart(words, CAPTION_MAX_CHARS)
 
     dialogue_lines = []
-    for line_words in lines:
+    import random
+
+    # Kinetic positioning: randomize position every 2 lines to prevent habituation
+    # Safe zone: X=440-640 (center ±100px), Y=700-1100 (above TikTok UI, readable zone)
+    def get_random_position():
+        """Generate random (x, y) within safe readable zone."""
+        x = random.randint(440, 640)  # Center horizontal with slight offset
+        y = random.randint(700, 1100)  # Bottom-middle zone, above UI elements
+        return x, y
+
+    for i, line_words in enumerate(lines):
         if not line_words:
             continue
 
@@ -474,6 +438,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             karaoke_text += f"{{\\kf{duration_cs}}}{display_word} "
 
         karaoke_text = karaoke_text.strip()
+
+        # KINETIC JUMPY CAPTIONS: Randomize position every 2 lines (every ~2-4 seconds)
+        # This prevents viewer habituation and forces active eye tracking
+        if i % 2 == 0:
+            x, y = get_random_position()
+            position_override = f"{{\\pos({x},{y})}}"
+        else:
+            # Alternate lines: use slightly different position for "bounce" effect
+            x, y = get_random_position()
+            position_override = f"{{\\pos({x},{y})}}"
+
+        # Inject position override at start of karaoke text
+        karaoke_text = f"{position_override}{karaoke_text}"
+
         dialogue_lines.append(
             f"Dialogue: 0,{start_ts},{end_ts},Default,,0,0,0,,{karaoke_text}"
         )
@@ -560,6 +538,13 @@ def render_short(
     clip_end = clip_data["end"]
     clip_duration = clip_end - clip_start
 
+    # YOUTUBE SHORTS HARD CAP: Enforce 59.5s maximum (60.0s = death sentence)
+    YOUTUBE_SHORTS_MAX = 59.5
+    if clip_duration > YOUTUBE_SHORTS_MAX:
+        log("RENDER", f"⚠️  Clip {clip_duration:.1f}s exceeds YouTube limit. Trimming to {YOUTUBE_SHORTS_MAX}s", "WARN")
+        clip_end = clip_start + YOUTUBE_SHORTS_MAX
+        clip_duration = YOUTUBE_SHORTS_MAX
+
     source_w = scene_data["source_width"]
     source_h = scene_data["source_height"]
 
@@ -589,7 +574,8 @@ def render_short(
 
     # ── Step 2: Background music + sidechain ───
     impact_moments = clip_data.get("impact_moments", [])
-    music_path = select_background_music(clean_audio)
+    visual_style = clip_data.get("visual_style", "")
+    music_path = select_background_music(visual_style=visual_style, duration=clip_duration)
     if music_path:
         build_sidechain_audio(clean_audio, music_path, final_audio, clip_duration,
                               impact_moments=impact_moments)
@@ -676,6 +662,33 @@ def render_short(
             log("RENDER", f"LUT applied: {lut_file}")
         else:
             log("RENDER", f"LUT file not found: {lut_path} (skipping)", "WARN")
+
+    # ── Step 4c: YouTube Shorts Hook (3-Second Pattern Interrupt) ──
+    # Add aggressive zoom-in effect in first 0.8s to prevent swipe-away
+    # Uses conditional scale: zoom from 1.0x to 1.15x over first 0.8s, then hold
+    filter_complex = filter_complex.replace(
+        "[vout]",
+        f"scale=w=iw*if(lt(t,0.8),1+0.15*t/0.8,1.15):h=ih*if(lt(t,0.8),1+0.15*t/0.8,1.15),"
+        f"crop={TARGET_WIDTH}:{TARGET_HEIGHT}[vout]"
+    )
+    log("RENDER", "YouTube Shorts Hook: 3-second zoom pattern interrupt enabled")
+
+    # ── Step 4d: Signature Brand Watermark (Channel Identity) ──
+    from config import ENABLE_BRAND_WATERMARK, BRAND_COLOR_CYAN
+    if ENABLE_BRAND_WATERMARK:
+        # Add subtle brand identifier in top-right corner (neon cyan glow)
+        # Uses drawtext with fade-in effect for professional look
+        brand_text = "AutoShorts"  # Change this to your channel name
+        filter_complex = filter_complex.replace(
+            "[vout]",
+            f"drawtext=text='{brand_text}':"
+            f"fontfile=/Windows/Fonts/arial.ttf:"  # Fallback to system font
+            f"fontsize=24:"
+            f"fontcolor=00FFFF@0.8:"  # Cyan with 80% opacity
+            f"x=w-tw-20:y=20:"  # Top-right corner with 20px padding
+            f"borderw=2:bordercolor=black@0.5[vout]"
+        )
+        log("RENDER", f"Brand watermark added: {brand_text}")
 
     # ── Step 5: Build hwaccel + encode command ─
     encoder, encoder_opts = _get_encoder()

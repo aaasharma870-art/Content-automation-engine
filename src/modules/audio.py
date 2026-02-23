@@ -8,7 +8,7 @@ import edge_tts
 from faster_whisper import WhisperModel
 
 from config import DEFAULT_VOICE, VOICE_MATRIX, TARGET_LUFS, MUSIC_VOLUME_DB, SFX_DIR
-from modules.utils import log, get_ffmpeg_bin
+from src.modules.utils import log, get_ffmpeg_bin
 import random
 
 DUCKING_MUSIC_VOL = MUSIC_VOLUME_DB
@@ -67,10 +67,22 @@ def generate_subtitles(audio_path: str) -> list:
     
     # Use "tiny" or "base" for speed, "small" for accuracy. "base" is good tradeoff.
     # On GPU if available
-    device = "cuda" if subprocess.run(["nvidia-smi"], capture_output=True).returncode == 0 else "cpu"
+    try:
+        device = "cuda" if subprocess.run(["nvidia-smi"], capture_output=True).returncode == 0 else "cpu"
+    except FileNotFoundError:
+        device = "cpu"
     compute_type = "float16" if device == "cuda" else "int8"
     
     try:
+        # Faster-Whisper relies on 'ffmpeg' existing in the system PATH
+        # We must temporarily prepend our resolved ffmpeg binary directory to the PATH
+        from src.modules.utils import get_ffmpeg_bin
+        import os
+        ffmpeg_dir = os.path.dirname(get_ffmpeg_bin())
+        original_path = os.environ.get("PATH", "")
+        if ffmpeg_dir not in original_path:
+            os.environ["PATH"] = f"{ffmpeg_dir}{os.pathsep}{original_path}"
+
         model = WhisperModel("base", device=device, compute_type=compute_type)
         segments, info = model.transcribe(audio_path, word_timestamps=True)
         
@@ -159,7 +171,7 @@ def generate_flow_audio(segments: list, output_path: str) -> dict:
     """
     from pydub import AudioSegment
     from pydub.silence import detect_nonsilent
-    from modules.utils import get_ffmpeg_bin, get_ffprobe_bin
+    from src.modules.utils import get_ffmpeg_bin, get_ffprobe_bin
 
     # Configure Pydub with local FFmpeg
     AudioSegment.converter = get_ffmpeg_bin()

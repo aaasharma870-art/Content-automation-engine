@@ -1,0 +1,813 @@
+﻿diff --git a/config.py b/config.py
+index c4b6368..f1b13ed 100644
+--- a/config.py
++++ b/config.py
+@@ -87,7 +87,7 @@ SIDECHAIN_THRESHOLD = 0.015
+ SIDECHAIN_RATIO = 3
+ SIDECHAIN_ATTACK = 1          # ms ΓÇö instant drop when speech detected
+ SIDECHAIN_RELEASE = 500        # ms ΓÇö smooth fade-back during pauses
+-MUSIC_VOLUME_DB = -14          # Base music volume before ducking (lower = subtler)
++MUSIC_VOLUME_DB = -20          # Subtler background music (down from -14 for less intrusion)
+ 
+ # ΓöÇΓöÇ Director Constants ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+ FACE_SAMPLE_RATE = 4           # Lower = smoother tracking (was 10)
+@@ -97,14 +97,19 @@ KALMAN_PROCESS_NOISE = 0.1     # Higher = faster response (was 0.03)
+ CAPTION_FONT = "Montserrat-Bold"
+ CAPTION_FONT_SIZE = 70                   # Readable on mobile
+ CAPTION_PRIMARY_COLOR = "&H00FFFFFF"     # White base (BGR in ASS)
+-CAPTION_HIGHLIGHT_COLOR = "&H0000FFFF"   # Yellow highlight for active word
++CAPTION_HIGHLIGHT_COLOR = "&H00FFFF00"   # Neon cyan (SIGNATURE BRAND COLOR - BGR format)
+ CAPTION_OUTLINE_COLOR = "&H00000000"     # Black outline
+ CAPTION_OUTLINE_WIDTH = 5                # Thicker outline for readability
+ CAPTION_SHADOW_DEPTH = 3
+-CAPTION_MARGIN_BOTTOM = 200              # Increased for safety (above UI)
++CAPTION_MARGIN_BOTTOM = 600              # Safe zone: keeps captions above TikTok UI (35% = 672px)
+ CAPTION_MAX_CHARS = 15                   # Max chars on screen at once
+ CAPTION_UPPERCASE = True
+ 
++# ΓöÇΓöÇ Signature Brand Identity ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++BRAND_COLOR_CYAN = "&H00FFFF00"          # Neon cyan (BGR) - Primary brand color
++BRAND_COLOR_PURPLE = "&H00FF00FF"        # Electric purple (BGR) - Secondary brand
++ENABLE_BRAND_WATERMARK = True            # Show brand logo/watermark in corner
++
+ # ΓöÇΓöÇ B-Roll (CLIP/FAISS) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+ CLIP_MODEL_NAME = "ViT-B/32"
+ BROLL_SAMPLE_FRAMES = 5      # Frames to extract per b-roll clip
+@@ -113,10 +118,9 @@ BROLL_MIN_SIMILARITY = 0.25  # Review: Increased from 0.20 to reduce bad matches
+ 
+ # ΓöÇΓöÇ Pipeline Settings ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+ POLL_INTERVAL_SECONDS = 30
+-MAX_CLIPS_PER_VIDEO = 5
++MAX_CLIPS_PER_VIDEO = 3  # Force "top 3" selection (quality over quantity)
+ CLIP_MIN_DURATION = 30
+-CLIP_MAX_DURATION = 60
+-CLIP_MAX_DURATION = 60
++CLIP_MAX_DURATION = 59.5  # YouTube Shorts hard limit (60.0s = death sentence)
+ CAPTION_REVIEW_PAUSE = False   # Pause for human caption review before rendering
+ CRITIC_ENABLED = False         # Enable Multimodal Critic (Gemini Vision) for QA
+ 
+@@ -173,7 +177,8 @@ VOICE_MATRIX = {
+     "STORY": "en-US-ChristopherNeural",
+     "NEWS": "en-US-GuyNeural",
+     "FACTS": "en-US-EricNeural",
+-    "HORROR": "en-US-ChristopherNeural" # Deep voice
++    "HORROR": "en-US-ChristopherNeural", # Deep voice
++    "REDDIT": "en-US-SteffanNeural"  # High-energy, dynamic cadence for Reddit stories
+ }
+ SAFETY_FILTERS = ["hate speech", "explicit", "self-harm", "violence"]
+ 
+diff --git a/src/main.py b/src/main.py
+index 1f46ae7..567f42f 100644
+--- a/src/main.py
++++ b/src/main.py
+@@ -11,7 +11,7 @@ SRC_DIR = Path(__file__).resolve().parent
+ sys.path.append(str(ROOT_DIR))
+ sys.path.append(str(SRC_DIR))
+ 
+-from modules.utils import log, get_ffmpeg_bin
++from src.modules.utils import log, get_ffmpeg_bin
+ 
+ 
+ LOGO = r"""
+@@ -56,21 +56,34 @@ async def main():
+         print("\nChoose Mode:")
+         print("  [1] Repurpose Video (URL -> Clips)")
+         print("  [2] Generate New (Topic -> AI Video)")
++        print("  [3] Reddit Story (Scrape Story -> TTS Overlay)")
+         print("  [q] Quit")
+-        
++
+         choice = input("Select > ").strip().lower()
+-        
++
+         if choice == 'q':
+             break
+-            
++
+         if choice == '1':
+             from pipelines import repurpose
+             await repurpose.run_pipeline()
+-            
++
+         elif choice == '2':
+             from pipelines import generate
+             await generate.run_pipeline()
+-            
++
++        elif choice == '3':
++            from pipelines import reddit
++            print("\n" + "="*50)
++            print("REDDIT STORY MODE")
++            print("="*50)
++            bg_path = input("Background video path (e.g., gameplay.mp4): ").strip()
++            if not Path(bg_path).exists():
++                print(f"{Fore.RED}ERROR: File not found: {bg_path}{Style.RESET_ALL}")
++                continue
++            subreddit = input("Subreddit (default: TrueOffMyChest): ").strip() or "TrueOffMyChest"
++            await reddit.build_reddit_video(bg_path, subreddit)
++
+         else:
+             print("Invalid choice.")
+ 
+diff --git a/src/modules/audio.py b/src/modules/audio.py
+index 8f75293..bcaa3e6 100644
+--- a/src/modules/audio.py
++++ b/src/modules/audio.py
+@@ -8,7 +8,7 @@ import edge_tts
+ from faster_whisper import WhisperModel
+ 
+ from config import DEFAULT_VOICE, VOICE_MATRIX, TARGET_LUFS, MUSIC_VOLUME_DB, SFX_DIR
+-from modules.utils import log, get_ffmpeg_bin
++from src.modules.utils import log, get_ffmpeg_bin
+ import random
+ 
+ DUCKING_MUSIC_VOL = MUSIC_VOLUME_DB
+@@ -67,10 +67,22 @@ def generate_subtitles(audio_path: str) -> list:
+     
+     # Use "tiny" or "base" for speed, "small" for accuracy. "base" is good tradeoff.
+     # On GPU if available
+-    device = "cuda" if subprocess.run(["nvidia-smi"], capture_output=True).returncode == 0 else "cpu"
++    try:
++        device = "cuda" if subprocess.run(["nvidia-smi"], capture_output=True).returncode == 0 else "cpu"
++    except FileNotFoundError:
++        device = "cpu"
+     compute_type = "float16" if device == "cuda" else "int8"
+     
+     try:
++        # Faster-Whisper relies on 'ffmpeg' existing in the system PATH
++        # We must temporarily prepend our resolved ffmpeg binary directory to the PATH
++        from src.modules.utils import get_ffmpeg_bin
++        import os
++        ffmpeg_dir = os.path.dirname(get_ffmpeg_bin())
++        original_path = os.environ.get("PATH", "")
++        if ffmpeg_dir not in original_path:
++            os.environ["PATH"] = f"{ffmpeg_dir}{os.pathsep}{original_path}"
++
+         model = WhisperModel("base", device=device, compute_type=compute_type)
+         segments, info = model.transcribe(audio_path, word_timestamps=True)
+         
+@@ -159,7 +171,7 @@ def generate_flow_audio(segments: list, output_path: str) -> dict:
+     """
+     from pydub import AudioSegment
+     from pydub.silence import detect_nonsilent
+-    from modules.utils import get_ffmpeg_bin, get_ffprobe_bin
++    from src.modules.utils import get_ffmpeg_bin, get_ffprobe_bin
+ 
+     # Configure Pydub with local FFmpeg
+     AudioSegment.converter = get_ffmpeg_bin()
+diff --git a/src/modules/brain.py b/src/modules/brain.py
+index 581dda3..cb37eaa 100644
+--- a/src/modules/brain.py
++++ b/src/modules/brain.py
+@@ -46,12 +46,27 @@ Select the {max_clips} most engaging, self-contained segments ({min_dur}-{max_du
+ 
+ **virality_score = (hook * 0.30) + (flow * 0.25) + (value * 0.25) + (trend * 0.20)**
+ 
++**VIRAL STRUCTURE PREFERENCE:**
++ALWAYS prioritize segments with enumeration patterns ("3 reasons", "first", "number one", "here are").
++Listicle/Proof structures have 15-20% higher retention than narrative storytelling.
++When scanning segments:
++- If enumeration markers detected ΓåÆ boost Hook score by +10
++- If list structure spans 30-60s ΓåÆ automatic virality_score floor of 85
++
+ **ANTI-SLOP RULES:**
+ - NEVER select filler ("thanks for watching", "subscribe", "let me know in the comments")
+ - NEVER select segments just because they're near the beginning or end
+ - PREFER strong declarative statements, surprising reveals, or contrarian takes
+ - PREFER moments where the speaker's vocal energy is high
+ 
++**VIRALITY THRESHOLD:**
++ONLY output segments with virality_score ΓëÑ 85. Reject:
++- Filler commentary ("so yeah", "as I was saying")
++- Low-energy explanations without conflict/surprise
++- Segments with <75 Hook score (weak openings kill retention)
++
++Prioritize: High-retention stories, contrarian takes, actionable tips, shocking reveals.
++
+ **CONTENT TYPE TAGGING:**
+ - `"talking_head"`: Speaker on camera (DEFAULT)
+ - `"screen_share"`: Charts, screens, visual data mentioned
+@@ -275,6 +290,22 @@ def _parse_response(raw_text: str) -> list:
+         composite = clip.get("virality_score",
+                              int(hook * 0.30 + flow * 0.25 + value * 0.25 + trend * 0.20))
+ 
++        # VIRAL FORMULA: Boost score if enumeration markers detected (listicle preference)
++        enumeration_markers = [
++            "here are", "number one", "first reason", "three things", "3 reasons",
++            "top 3", "top three", "first,", "second,", "third,", "finally,",
++            "reason 1", "reason 2", "point number", "step one"
++        ]
++        description_text = str(clip.get("description", "")).lower()
++        hook_text = str(clip.get("hook_text", "")).lower()
++        title_text = str(clip.get("proposed_title", "")).lower()
++        combined_text = f"{description_text} {hook_text} {title_text}"
++
++        has_list_structure = any(marker in combined_text for marker in enumeration_markers)
++        if has_list_structure:
++            composite = min(100, composite + 10)  # +10 bonus for listicle structure
++            log("BRAIN", f"  ΓåÆ Listicle detected! Boosting score: {composite}", "DEBUG")
++
+         valid.append({
+             "start": round(start, 3),
+             "end": round(end, 3),
+diff --git a/src/modules/editor.py b/src/modules/editor.py
+index 0ffd136..59d60f7 100644
+--- a/src/modules/editor.py
++++ b/src/modules/editor.py
+@@ -94,7 +94,10 @@ def normalize_audio(input_path: str, output_path: str) -> str:
+ 
+ 
+ def remove_silence(input_path: str, output_path: str) -> str:
+-    """Truncate silence gaps >500ms for jump-cut pacing."""
++    """
++    Truncate silence gaps >500ms for jump-cut pacing.
++    Also removes leading/trailing silence for perfect YouTube Shorts loopability.
++    """
+     log("EDITOR", f"Removing silence (>{SILENCE_MIN_DURATION_MS}ms)...")
+ 
+     silence_dur = SILENCE_MIN_DURATION_MS / 1000.0
+@@ -102,9 +105,20 @@ def remove_silence(input_path: str, output_path: str) -> str:
+         FFMPEG_BIN, "-y", "-i", input_path, "-hide_banner",
+         "-af", (
+             f"silenceremove="
++            # Remove leading silence
++            f"start_periods=1:"
++            f"start_duration=0.1:"
++            f"start_threshold={SILENCE_THRESHOLD_DB}dB:"
++            # Remove middle silence gaps
+             f"stop_periods=-1:"
+             f"stop_duration={silence_dur}:"
+-            f"stop_threshold={SILENCE_THRESHOLD_DB}dB"
++            f"stop_threshold={SILENCE_THRESHOLD_DB}dB,"
++            # Remove trailing silence (critical for loopability)
++            f"areverse,silenceremove="
++            f"start_periods=1:"
++            f"start_duration=0.1:"
++            f"start_threshold={SILENCE_THRESHOLD_DB}dB,"
++            f"areverse"
+         ),
+         "-c:a", "aac", "-b:a", "192k",
+         output_path,
+@@ -115,128 +129,68 @@ def remove_silence(input_path: str, output_path: str) -> str:
+         log("EDITOR", "Silence removal failed, using original", "WARN")
+         shutil.copy2(input_path, output_path)
+     else:
+-        log("EDITOR", "Silence removed", "OK")
++        log("EDITOR", "Silence removed (including tail for loopability)", "OK")
+ 
+     return output_path
+ 
+ 
+-def select_background_music(voice_path: str = None) -> str | None:
+-    """
+-    Select background music by matching acoustic features (tempo, mood, intensity).
+-    Uses a cached index (music_index.json) to avoid re-analyzing music library.
++def select_background_music(visual_style: str = None, duration: float = 60.0, voice_path: str = None) -> str | None:
+     """
+-    music_files = []
+-    for ext in ["*.mp3", "*.wav", "*.m4a", "*.ogg", "*.flac"]:
+-        music_files.extend(MUSIC_DIR.glob(ext))
++    Select background music matching visual style.
+ 
+-    if not music_files:
+-        log("EDITOR", "No music files in assets/music/", "WARN")
+-        return None
++    Uses subdirectory structure for style-based selection:
++    - assets/music/cinematic/ ΓåÆ "dark", "moody", "luxury"
++    - assets/music/upbeat/ ΓåÆ "energetic", "bright"
++    - assets/music/neutral/ ΓåÆ "vlog", "minimal"
+ 
+-    if not voice_path:
+-        return str(random.choice(music_files))
++    Args:
++        visual_style: Style keyword from Brain (e.g., "dark moody", "bright energetic")
++        duration: Target duration (unused, kept for compatibility)
++        voice_path: Legacy parameter (unused, kept for compatibility)
+ 
+-    # ΓöÇΓöÇ 1. Analyze Voice Track (Reference) ΓöÇΓöÇ
+-    try:
+-        import librosa
+-        import numpy as np
+-        
+-        # Load 30s of voice
+-        y_voice, sr = librosa.load(voice_path, sr=22050, duration=30)
+-        
+-        # Extract Features
+-        # 1. Energy (RMS) - Intensity
+-        rms_voice = float(np.mean(librosa.feature.rms(y=y_voice)))
+-        # 2. Spectral Centroid - Brightness
+-        cent_voice = float(np.mean(librosa.feature.spectral_centroid(y=y_voice, sr=sr)))
+-        # 3. Spectral Contrast - Emotional tension
+-        # (mean of the 4th band, roughly 200-400Hz, good for voice warmth)
+-        contrast_voice = float(np.mean(librosa.feature.spectral_contrast(y=y_voice, sr=sr)[3]))
+-        # 4. Tempo (BPM) - Pacing
+-        onset_env = librosa.onset.onset_strength(y=y_voice, sr=sr)
+-        tempo_voice = librosa.beat.tempo(onset_envelope=onset_env, sr=sr)
+-        tempo_voice = float(tempo_voice[0] if isinstance(tempo_voice, np.ndarray) else tempo_voice)
+-
+-        log("EDITOR", f"Voice Profile: BPM={tempo_voice:.0f}, Energy={rms_voice:.3f}, Contrast={contrast_voice:.1f}")
+-
+-    except Exception as e:
+-        log("EDITOR", f"Voice analysis failed: {e}", "WARN")
+-        return str(random.choice(music_files))
+-
+-    # ΓöÇΓöÇ 2. Load/Build Music Index ΓöÇΓöÇ
+-    index_path = MUSIC_DIR / "music_index.json"
+-    music_index = {}
+-    if index_path.exists():
+-        try:
+-            with open(index_path, "r") as f:
+-                music_index = json.load(f)
+-        except Exception:
+-            pass
++    Returns:
++        Path to selected music file, or None if no music available
++    """
+ 
+-    # Update index for new files
+-    updated = False
+-    valid_files = []
+-    
+-    for mf in music_files:
+-        if mf.name not in music_index:
+-            try:
+-                log("EDITOR", f"Analyzing new track: {mf.name}...")
+-                y_m, sr_m = librosa.load(str(mf), sr=22050, duration=30)
+-                
+-                # Extract same features
+-                rms_m = float(np.mean(librosa.feature.rms(y=y_m)))
+-                cent_m = float(np.mean(librosa.feature.spectral_centroid(y=y_m, sr=sr_m)))
+-                contrast_m = float(np.mean(librosa.feature.spectral_contrast(y=y_m, sr=sr_m)[3]))
+-                onset_m = librosa.onset.onset_strength(y=y_m, sr=sr_m)
+-                tempo_m = librosa.beat.tempo(onset_envelope=onset_m, sr=sr_m)
+-                tempo_m = float(tempo_m[0] if isinstance(tempo_m, np.ndarray) else tempo_m)
+-                
+-                music_index[mf.name] = {
+-                    "rms": rms_m,
+-                    "centroid": cent_m,
+-                    "contrast": contrast_m,
+-                    "tempo": tempo_m
+-                }
+-                updated = True
+-            except Exception as e:
+-                log("EDITOR", f"Failed to analyze {mf.name}: {e}", "WARN")
+-                continue
+-        
+-        valid_files.append(mf)
++    # Map visual_style keywords to music subdirectories
++    style_map = {
++        "dark": "cinematic", "moody": "cinematic", "luxury": "cinematic", "cinematic": "cinematic",
++        "energetic": "upbeat", "bright": "upbeat", "vibrant": "upbeat",
++        "vlog": "neutral", "minimal": "neutral", "casual": "neutral",
++    }
+ 
+-    if updated:
+-        with open(index_path, "w") as f:
+-            json.dump(music_index, f, indent=2)
++    subdir = "neutral"  # Default fallback
++    if visual_style:
++        style_lower = visual_style.lower()
++        for keyword, folder in style_map.items():
++            if keyword in style_lower:
++                subdir = folder
++                break
+ 
+-    # ΓöÇΓöÇ 3. Find Best Match (Weighted Euclidean Distance) ΓöÇΓöÇ
+-    best_match = None
+-    best_dist = float('inf')
++    # Try subdirectory first
++    music_path = MUSIC_DIR / subdir
++    if not music_path.exists():
++        log("EDITOR", f"Music subdirectory '{subdir}' not found, falling back to root", "WARN")
++        music_path = MUSIC_DIR  # Fallback to root directory
+ 
+-    # Weights: Tempo (40%), Energy (30%), Contrast (30%)
+-    # Normalize differences roughly to 0-1 range before weighting
+-    
+-    for mf in valid_files:
+-        data = music_index.get(mf.name)
+-        if not data:
+-            continue
+-            
+-        # Delta features
+-        d_tempo = abs(data["tempo"] - tempo_voice) / 200.0  # Normalize by ~200 BPM range
+-        d_rms = abs(data["rms"] - rms_voice) / 0.5          # Normalize by ~0.5 RMS range
+-        d_contrast = abs(data["contrast"] - contrast_voice) / 30.0
+-        
+-        # Composite distance
+-        dist = (d_tempo * 0.4) + (d_rms * 0.3) + (d_contrast * 0.3)
+-        
+-        if dist < best_dist:
+-            best_dist = dist
+-            best_match = mf
++    # Find all music files
++    candidates = []
++    for ext in ["*.mp3", "*.wav", "*.m4a", "*.ogg", "*.flac"]:
++        candidates.extend(music_path.glob(ext))
+ 
+-    if best_match:
+-        log("EDITOR", f"Mood Match: {best_match.name} (dist={best_dist:.3f})", "OK")
+-        return str(best_match)
+-    
+-    return str(random.choice(music_files))
++    # If subdirectory is empty, try root
++    if not candidates and music_path != MUSIC_DIR:
++        log("EDITOR", f"No music in '{subdir}/', trying root directory", "WARN")
++        for ext in ["*.mp3", "*.wav", "*.m4a", "*.ogg", "*.flac"]:
++            candidates.extend(MUSIC_DIR.glob(ext))
++
++    if not candidates:
++        log("EDITOR", "No music files found in assets/music/", "WARN")
++        return None
++
++    selected = str(random.choice(candidates))
++    log("EDITOR", f"Music selected: {Path(selected).name} (style: {visual_style or 'default'})", "OK")
++    return selected
+ 
+ 
+ def build_sidechain_audio(voice_path: str, music_path: str, output_path: str,
+@@ -442,7 +396,17 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+     lines = _group_words_smart(words, CAPTION_MAX_CHARS)
+ 
+     dialogue_lines = []
+-    for line_words in lines:
++    import random
++
++    # Kinetic positioning: randomize position every 2 lines to prevent habituation
++    # Safe zone: X=440-640 (center ┬▒100px), Y=700-1100 (above TikTok UI, readable zone)
++    def get_random_position():
++        """Generate random (x, y) within safe readable zone."""
++        x = random.randint(440, 640)  # Center horizontal with slight offset
++        y = random.randint(700, 1100)  # Bottom-middle zone, above UI elements
++        return x, y
++
++    for i, line_words in enumerate(lines):
+         if not line_words:
+             continue
+ 
+@@ -474,6 +438,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+             karaoke_text += f"{{\\kf{duration_cs}}}{display_word} "
+ 
+         karaoke_text = karaoke_text.strip()
++
++        # KINETIC JUMPY CAPTIONS: Randomize position every 2 lines (every ~2-4 seconds)
++        # This prevents viewer habituation and forces active eye tracking
++        if i % 2 == 0:
++            x, y = get_random_position()
++            position_override = f"{{\\pos({x},{y})}}"
++        else:
++            # Alternate lines: use slightly different position for "bounce" effect
++            x, y = get_random_position()
++            position_override = f"{{\\pos({x},{y})}}"
++
++        # Inject position override at start of karaoke text
++        karaoke_text = f"{position_override}{karaoke_text}"
++
+         dialogue_lines.append(
+             f"Dialogue: 0,{start_ts},{end_ts},Default,,0,0,0,,{karaoke_text}"
+         )
+@@ -560,6 +538,13 @@ def render_short(
+     clip_end = clip_data["end"]
+     clip_duration = clip_end - clip_start
+ 
++    # YOUTUBE SHORTS HARD CAP: Enforce 59.5s maximum (60.0s = death sentence)
++    YOUTUBE_SHORTS_MAX = 59.5
++    if clip_duration > YOUTUBE_SHORTS_MAX:
++        log("RENDER", f"ΓÜá∩╕Å  Clip {clip_duration:.1f}s exceeds YouTube limit. Trimming to {YOUTUBE_SHORTS_MAX}s", "WARN")
++        clip_end = clip_start + YOUTUBE_SHORTS_MAX
++        clip_duration = YOUTUBE_SHORTS_MAX
++
+     source_w = scene_data["source_width"]
+     source_h = scene_data["source_height"]
+ 
+@@ -589,7 +574,8 @@ def render_short(
+ 
+     # ΓöÇΓöÇ Step 2: Background music + sidechain ΓöÇΓöÇΓöÇ
+     impact_moments = clip_data.get("impact_moments", [])
+-    music_path = select_background_music(clean_audio)
++    visual_style = clip_data.get("visual_style", "")
++    music_path = select_background_music(visual_style=visual_style, duration=clip_duration)
+     if music_path:
+         build_sidechain_audio(clean_audio, music_path, final_audio, clip_duration,
+                               impact_moments=impact_moments)
+@@ -677,6 +663,33 @@ def render_short(
+         else:
+             log("RENDER", f"LUT file not found: {lut_path} (skipping)", "WARN")
+ 
++    # ΓöÇΓöÇ Step 4c: YouTube Shorts Hook (3-Second Pattern Interrupt) ΓöÇΓöÇ
++    # Add aggressive zoom-in effect in first 0.8s to prevent swipe-away
++    # Uses conditional scale: zoom from 1.0x to 1.15x over first 0.8s, then hold
++    filter_complex = filter_complex.replace(
++        "[vout]",
++        f"scale=w=iw*if(lt(t,0.8),1+0.15*t/0.8,1.15):h=ih*if(lt(t,0.8),1+0.15*t/0.8,1.15),"
++        f"crop={TARGET_WIDTH}:{TARGET_HEIGHT}[vout]"
++    )
++    log("RENDER", "YouTube Shorts Hook: 3-second zoom pattern interrupt enabled")
++
++    # ΓöÇΓöÇ Step 4d: Signature Brand Watermark (Channel Identity) ΓöÇΓöÇ
++    from config import ENABLE_BRAND_WATERMARK, BRAND_COLOR_CYAN
++    if ENABLE_BRAND_WATERMARK:
++        # Add subtle brand identifier in top-right corner (neon cyan glow)
++        # Uses drawtext with fade-in effect for professional look
++        brand_text = "AutoShorts"  # Change this to your channel name
++        filter_complex = filter_complex.replace(
++            "[vout]",
++            f"drawtext=text='{brand_text}':"
++            f"fontfile=/Windows/Fonts/arial.ttf:"  # Fallback to system font
++            f"fontsize=24:"
++            f"fontcolor=00FFFF@0.8:"  # Cyan with 80% opacity
++            f"x=w-tw-20:y=20:"  # Top-right corner with 20px padding
++            f"borderw=2:bordercolor=black@0.5[vout]"
++        )
++        log("RENDER", f"Brand watermark added: {brand_text}")
++
+     # ΓöÇΓöÇ Step 5: Build hwaccel + encode command ΓöÇ
+     encoder, encoder_opts = _get_encoder()
+     hwaccel_args = []
+diff --git a/src/modules/foundry.py b/src/modules/foundry.py
+index e8ebe43..94415f3 100644
+--- a/src/modules/foundry.py
++++ b/src/modules/foundry.py
+@@ -5,7 +5,7 @@ import gc
+ from diffusers import StableVideoDiffusionPipeline, AutoPipelineForText2Image
+ from diffusers.utils import export_to_video
+ from config import USE_LOCAL_GENERATION, GPU_VRAM_LIMIT, TEMP_DIR
+-from modules.utils import log
++from src.modules.utils import log
+ 
+ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+ DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
+diff --git a/src/modules/miner.py b/src/modules/miner.py
+index 1190f8b..6e94ac3 100644
+--- a/src/modules/miner.py
++++ b/src/modules/miner.py
+@@ -11,7 +11,7 @@ from scenedetect import VideoManager, SceneManager
+ from scenedetect.detectors import ContentDetector
+ 
+ from config import GOOGLE_API_KEY, GAMEPLAY_CHANNELS, GAMEPLAY_DIR
+-from modules.utils import log, get_ffprobe_bin, get_ffmpeg_bin
++from src.modules.utils import log, get_ffprobe_bin, get_ffmpeg_bin
+ 
+ # Configure Gemini
+ if GOOGLE_API_KEY:
+diff --git a/src/modules/render_gen.py b/src/modules/render_gen.py
+index 922bbef..f9bf7b5 100644
+--- a/src/modules/render_gen.py
++++ b/src/modules/render_gen.py
+@@ -3,7 +3,7 @@ import os
+ import math
+ import subprocess
+ from pathlib import Path
+-from modules.utils import log, get_ffmpeg_bin
++from src.modules.utils import log, get_ffmpeg_bin
+ from config import USE_NVENC, TARGET_WIDTH, TARGET_HEIGHT, FFMPEG_THREADS, OUTPUT_DIR
+ 
+ def _escape_path(path: str) -> str:
+@@ -194,44 +194,48 @@ def _create_slideshow(images: list, duration: float) -> str:
+ 
+ def _create_flash_cut_filter(stream_label, duration=4.0):
+     """
+-    Generate randomized 'Flash Cut' filter for video clips.
+-    Uses scale+crop with animated expressions (NOT zoompan, which is image-only).
+-    Patterns:
+-    A: Standard (Wide -> Zoom -> Pan)
+-    B: Impact (Zoom In -> Pull Back)
+-    C: Chaos (Step Zooms)
++    Generate 3-stage Flash Cut filter implementing the Luc Boulch viral formula.
++
++    The 3-Shot Rule: Every 4-second clip is divided into 3 distinct visual shots:
++    - Shot 1 (0-1.3s): Wide ΓÇö centered, establishes context
++    - Shot 2 (1.3-2.6s): Zoom 150% ΓÇö crop from top-left to simulate zoom-in
++    - Shot 3 (2.6-4.0s): Pan Left at Zoom 120% ΓÇö animated pan from right to left
++
++    Syncs with micro-SFX at 1.4s and 2.8s for maximum engagement.
++    Uses FFmpeg's conditional expressions: if(lt(t, threshold), value_if_true, value_if_false)
+     """
+-    import random
+-    
+-    patterns = ["A", "B", "C"]
+-    choice = random.choice(patterns)
+-    
+-    # For video inputs: scale UP first, then use animated crop to simulate zoom/pan.
+-    # Scale to 1.5x the target (1620x2880), then crop 1080x1920 with moving offsets.
+-    
+-    sw = int(1080 * 1.5)  # 1620
+-    sh = int(1920 * 1.5)  # 2880
+-    tw = 1080
+-    th = 1920
+-    
+-    # max offset: sw - tw = 540, sh - th = 960
+-    # 't' = time in seconds in FFmpeg expressions
+-    
+-    # Pattern A: Start centered, then pan right over time
+-    if choice == "A":
+-        x_expr = f"min(t*50,{sw - tw})"  # Pan right slowly
+-        y_expr = f"{(sh - th) // 2}"     # Center vertically
+-        
+-    # Pattern B: Start zoomed (top-left crop), drift to center
+-    elif choice == "B":
+-        x_expr = f"min(t*30,{(sw - tw) // 2})"
+-        y_expr = f"min(t*50,{(sh - th) // 2})"
+-        
+-    # Pattern C: Oscillate (bounce)
+-    else:
+-        x_expr = f"({(sw - tw) // 2})*(1+sin(t*3))/2"
+-        y_expr = f"({(sh - th) // 2})*(1+cos(t*2))/2"
+-    
++
++    # Scale video to 1.5x the target size for crop headroom
++    sw = int(1080 * 1.5)  # 1620 (scaled width)
++    sh = int(1920 * 1.5)  # 2880 (scaled height)
++    tw = 1080  # Target width
++    th = 1920  # Target height
++
++    # ΓöÇΓöÇ Shot 1 (0-1.3s): Wide ΓÇö Centered Crop ΓöÇΓöÇ
++    # Establishes full context, calm before the storm
++    x_wide = (sw - tw) // 2  # Center horizontally: 270
++    y_wide = (sh - th) // 2  # Center vertically: 480
++
++    # ΓöÇΓöÇ Shot 2 (1.3-2.6s): Zoom 150% ΓÇö Top-Left Crop ΓöÇΓöÇ
++    # Simulates zoom-in by cropping from a different offset
++    x_zoom = 0  # Crop from left edge
++    y_zoom = 0  # Crop from top edge
++
++    # ΓöÇΓöÇ Shot 3 (2.6-4.0s): Pan Left at Zoom 120% ΓÇö Animated Drift ΓöÇΓöÇ
++    # Pan from right edge to left edge over 1.4 seconds
++    x_pan_start = sw - tw  # Start at right edge: 540
++    x_pan_end = 0          # End at left edge: 0
++    y_pan = (sh - th) // 2  # Center vertically: 480
++
++    # Build conditional expressions using FFmpeg's 'if(condition, then, else)' syntax
++    # Structure: if(t < 1.3, shot1_value, if(t < 2.6, shot2_value, shot3_value))
++
++    # X-axis: Wide center -> Zoom left -> Pan left (right to left drift)
++    x_expr = f"if(lt(t,1.3),{x_wide},if(lt(t,2.6),{x_zoom},{x_pan_start}-((t-2.6)/1.4)*{x_pan_start}))"
++
++    # Y-axis: Wide center -> Zoom top -> Pan center
++    y_expr = f"if(lt(t,1.3),{y_wide},if(lt(t,2.6),{y_zoom},{y_pan}))"
++
+     return (
+         f"[{stream_label}]scale={sw}:{sh}:force_original_aspect_ratio=disable,"
+         f"crop={tw}:{th}:{x_expr}:{y_expr},"
+diff --git a/src/modules/utils.py b/src/modules/utils.py
+index 4d01c74..9115bd4 100644
+--- a/src/modules/utils.py
++++ b/src/modules/utils.py
+@@ -60,6 +60,73 @@ def get_ffmpeg_bin():
+     raise FileNotFoundError("FFmpeg binary not found! Please install FFmpeg or imageio-ffmpeg.")
+ 
+ def get_ffprobe_bin():
+-    """Locate FFprobe binary."""
+-    ffmpeg = get_ffmpeg_bin()
+-    return ffmpeg.replace("ffmpeg", "ffprobe")
++    """
++    Locate FFprobe binary.
++    Prioritizes bundled version, then system PATH.
++    """
++    # 1. Check for bundled generic path (from sister service)
++    root = Path(__file__).resolve().parent.parent.parent.parent
++    bundled = list(root.glob("ffmpeg-*/bin/ffprobe.exe"))
++    if bundled:
++        return str(bundled[0])
++        
++    bundled_linux = list(root.glob("ffmpeg-*/bin/ffprobe"))
++    if bundled_linux:
++        return str(bundled_linux[0])
++
++    # 2. Check system PATH
++    system_ffprobe = shutil.which("ffprobe")
++    if system_ffprobe:
++        return system_ffprobe
++        
++    # 3. Check environment variable
++    env_path = os.environ.get("FFPROBE_PATH")
++    if env_path and os.path.isfile(env_path):
++        return env_path
++        
++    # 4. Fallback to imageio-ffmpeg path hack (rarely works for ffprobe)
++    try:
++        import imageio_ffmpeg
++        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
++        if "ffmpeg" in ffmpeg_exe.lower():
++            # Try to infer ffprobe path from ffmpeg path
++            ffprobe_exe = ffmpeg_exe.replace("ffmpeg", "ffprobe")
++            if os.path.isfile(ffprobe_exe):
++                return ffprobe_exe
++    except (ImportError, RuntimeError):
++        pass
++        
++    # 5. Auto-Download Fallback (Windows only)
++    import platform
++    if platform.system() == "Windows":
++        bin_dir = Path(__file__).resolve().parent.parent.parent / "bin"
++        bin_dir.mkdir(exist_ok=True)
++        ffprobe_exe = bin_dir / "ffprobe.exe"
++        if ffprobe_exe.exists():
++            return str(ffprobe_exe)
++            
++        log("UTILS", "FFprobe not found. Auto-downloading standalone Windows binary...", "WARN")
++        try:
++            import urllib.request
++            url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
++            zip_path = bin_dir / "ffmpeg.zip"
++            urllib.request.urlretrieve(url, str(zip_path))
++            
++            import zipfile
++            with zipfile.ZipFile(str(zip_path), 'r') as zip_ref:
++                for member in zip_ref.namelist():
++                    if member.endswith("ffprobe.exe"):
++                        source = zip_ref.open(member)
++                        target = open(str(ffprobe_exe), "wb")
++                        with source, target:
++                            shutil.copyfileobj(source, target)
++                        break
++                        
++            zip_path.unlink()
++            if ffprobe_exe.exists():
++                log("UTILS", "FFprobe installed successfully.", "OK")
++                return str(ffprobe_exe)
++        except Exception as e:
++            log("UTILS", f"Auto-download failed: {e}", "ERROR")
++
++    raise FileNotFoundError("FFprobe binary not found! Please install FFmpeg (which includes ffprobe) and add to PATH.")
+diff --git a/src/modules/validator.py b/src/modules/validator.py
+index b7f9ab1..8b0b603 100644
+--- a/src/modules/validator.py
++++ b/src/modules/validator.py
+@@ -1,7 +1,7 @@
+ 
+ import os
+-from modules.utils import log
+-from modules.render_gen import _get_duration
++from src.modules.utils import log
++from src.modules.render_gen import _get_duration
+ 
+ def validate_assets(assets: dict) -> bool:
+     """
+diff --git a/src/modules/vision.py b/src/modules/vision.py
+index f143b33..5a8fd48 100644
+--- a/src/modules/vision.py
++++ b/src/modules/vision.py
+@@ -6,7 +6,7 @@ from pathlib import Path
+ from openai import AsyncOpenAI
+ 
+ from config import OPENAI_API_KEY, TEMP_DIR
+-from modules.utils import log
++from src.modules.utils import log
+ 
+ client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+ 
+diff --git a/src/pipelines/generate.py b/src/pipelines/generate.py
+index 5998f5b..c5cb4ee 100644
+--- a/src/pipelines/generate.py
++++ b/src/pipelines/generate.py
+@@ -4,7 +4,7 @@ import shutil
+ import os
+ from config import TEMP_DIR, DEFAULT_MODE, ASSETS_DIR
+ from modules import miner, vision, audio, render_gen as render, validator
+-from modules.utils import log
++from src.modules.utils import log
+ 
+ async def run_pipeline(topic: str = None):
+     """
+diff --git a/src/pipelines/repurpose.py b/src/pipelines/repurpose.py
+index d056ad2..bda77fb 100644
+--- a/src/pipelines/repurpose.py
++++ b/src/pipelines/repurpose.py
+@@ -19,13 +19,13 @@ from config import (
+     PROCESSED_DIR, TEMP_DIR, POLL_INTERVAL_SECONDS,
+     GOOGLE_API_KEY, OPENAI_API_KEY, LLM_PROVIDER,
+ )
+-from modules.utils import log
+-from modules.ingest import download_video, is_valid_youtube_url
+-from modules.transcribe import transcribe_video, refine_timestamps, get_words_in_range
+-from modules.brain import analyze_transcript
+-from modules.director import analyze_scene
+-from modules.editor import render_short
+-from modules.distributor import schedule_posts
++from src.modules.utils import log
++from src.modules.ingest import download_video, is_valid_youtube_url
++from src.modules.transcribe import transcribe_video, refine_timestamps, get_words_in_range
++from src.modules.brain import analyze_transcript
++from src.modules.director import analyze_scene
++from src.modules.editor import render_short
++from src.modules.distributor import schedule_posts
+ 
+ async def run_pipeline(url_arg: str = None):
+     """
+@@ -112,8 +112,14 @@ def process_video(url: str):
+     motion_score = video_info.get("motion_score", "unknown")
+     clips = analyze_transcript(full_text, metadata, motion_score=motion_score)
+ 
++    # ENGAGEMENT FILTER: Only keep top-tier clips (virality_score >= 85)
++    clips = [c for c in clips if c.get("virality_score", 0) >= 85]
++    clips = clips[:MAX_CLIPS_PER_VIDEO]  # Hard cap at 3 (quality over quantity)
++
++    log("REPURPOSE", f"After filtering: {len(clips)} clips passed virality threshold (ΓëÑ85)")
++
+     if not clips:
+-        raise RuntimeError("Brain found no viral segments in this video")
++        raise RuntimeError("Brain found no viral segments in this video (no clips passed virality_score ΓëÑ 85)")
+ 
+     # ΓòÉΓòÉΓòÉ PHASE 4-5: DIRECTOR + EDITOR ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+     rendered_paths = []

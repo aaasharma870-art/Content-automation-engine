@@ -11,7 +11,7 @@ from scenedetect import VideoManager, SceneManager
 from scenedetect.detectors import ContentDetector
 
 from config import GOOGLE_API_KEY, GAMEPLAY_CHANNELS, GAMEPLAY_DIR
-from modules.utils import log, get_ffprobe_bin, get_ffmpeg_bin
+from src.modules.utils import log, get_ffprobe_bin, get_ffmpeg_bin
 
 # Configure Gemini
 if GOOGLE_API_KEY:

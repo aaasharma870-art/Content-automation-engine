@@ -6,7 +6,7 @@ from pathlib import Path
 from openai import AsyncOpenAI
 
 from config import OPENAI_API_KEY, TEMP_DIR
-from modules.utils import log
+from src.modules.utils import log
 
 client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 

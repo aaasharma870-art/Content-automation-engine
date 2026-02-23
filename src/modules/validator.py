@@ -1,7 +1,7 @@
 
 import os
-from modules.utils import log
-from modules.render_gen import _get_duration
+from src.modules.utils import log
+from src.modules.render_gen import _get_duration
 
 def validate_assets(assets: dict) -> bool:
     """

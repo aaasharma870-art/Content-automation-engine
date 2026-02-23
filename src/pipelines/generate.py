@@ -4,7 +4,7 @@ import shutil
 import os
 from config import TEMP_DIR, DEFAULT_MODE, ASSETS_DIR
 from modules import miner, vision, audio, render_gen as render, validator
-from modules.utils import log
+from src.modules.utils import log
 
 async def run_pipeline(topic: str = None):
     """

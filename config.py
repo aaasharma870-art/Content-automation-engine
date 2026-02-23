@@ -87,7 +87,7 @@ SIDECHAIN_THRESHOLD = 0.015
 SIDECHAIN_RATIO = 3
 SIDECHAIN_ATTACK = 1          # ms — instant drop when speech detected
 SIDECHAIN_RELEASE = 500        # ms — smooth fade-back during pauses
-MUSIC_VOLUME_DB = -14          # Base music volume before ducking (lower = subtler)
+MUSIC_VOLUME_DB = -20          # Subtler background music (down from -14 for less intrusion)
 
 # ── Director Constants ───────────────────────────
 FACE_SAMPLE_RATE = 4           # Lower = smoother tracking (was 10)
@@ -97,13 +97,18 @@ KALMAN_PROCESS_NOISE = 0.1     # Higher = faster response (was 0.03)
 CAPTION_FONT = "Montserrat-Bold"
 CAPTION_FONT_SIZE = 70                   # Readable on mobile
 CAPTION_PRIMARY_COLOR = "&H00FFFFFF"     # White base (BGR in ASS)
-CAPTION_HIGHLIGHT_COLOR = "&H0000FFFF"   # Yellow highlight for active word
+CAPTION_HIGHLIGHT_COLOR = "&H00FFFF00"   # Neon cyan (SIGNATURE BRAND COLOR - BGR format)
 CAPTION_OUTLINE_COLOR = "&H00000000"     # Black outline
 CAPTION_OUTLINE_WIDTH = 5                # Thicker outline for readability
 CAPTION_SHADOW_DEPTH = 3
-CAPTION_MARGIN_BOTTOM = 200              # Increased for safety (above UI)
+CAPTION_MARGIN_BOTTOM = 600              # Safe zone: keeps captions above TikTok UI (35% = 672px)
 CAPTION_MAX_CHARS = 15                   # Max chars on screen at once
 CAPTION_UPPERCASE = True
+
+# ── Signature Brand Identity ─────────────────────
+BRAND_COLOR_CYAN = "&H00FFFF00"          # Neon cyan (BGR) - Primary brand color
+BRAND_COLOR_PURPLE = "&H00FF00FF"        # Electric purple (BGR) - Secondary brand
+ENABLE_BRAND_WATERMARK = True            # Show brand logo/watermark in corner
 
 # ── B-Roll (CLIP/FAISS) ─────────────────────────
 CLIP_MODEL_NAME = "ViT-B/32"
@@ -113,10 +118,9 @@ BROLL_MIN_SIMILARITY = 0.25  # Review: Increased from 0.20 to reduce bad matches
 
 # ── Pipeline Settings ────────────────────────────
 POLL_INTERVAL_SECONDS = 30
-MAX_CLIPS_PER_VIDEO = 5
+MAX_CLIPS_PER_VIDEO = 3  # Force "top 3" selection (quality over quantity)
 CLIP_MIN_DURATION = 30
-CLIP_MAX_DURATION = 60
-CLIP_MAX_DURATION = 60
+CLIP_MAX_DURATION = 59.5  # YouTube Shorts hard limit (60.0s = death sentence)
 CAPTION_REVIEW_PAUSE = False   # Pause for human caption review before rendering
 CRITIC_ENABLED = False         # Enable Multimodal Critic (Gemini Vision) for QA
 
@@ -173,7 +177,8 @@ VOICE_MATRIX = {
     "STORY": "en-US-ChristopherNeural",
     "NEWS": "en-US-GuyNeural",
     "FACTS": "en-US-EricNeural",
-    "HORROR": "en-US-ChristopherNeural" # Deep voice
+    "HORROR": "en-US-ChristopherNeural", # Deep voice
+    "REDDIT": "en-US-SteffanNeural"  # High-energy, dynamic cadence for Reddit stories
 }
 SAFETY_FILTERS = ["hate speech", "explicit", "self-harm", "violence"]
 

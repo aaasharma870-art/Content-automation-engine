@@ -46,11 +46,26 @@ Select the {max_clips} most engaging, self-contained segments ({min_dur}-{max_du
 
 **virality_score = (hook * 0.30) + (flow * 0.25) + (value * 0.25) + (trend * 0.20)**
 
+**VIRAL STRUCTURE PREFERENCE:**
+ALWAYS prioritize segments with enumeration patterns ("3 reasons", "first", "number one", "here are").
+Listicle/Proof structures have 15-20% higher retention than narrative storytelling.
+When scanning segments:
+- If enumeration markers detected → boost Hook score by +10
+- If list structure spans 30-60s → automatic virality_score floor of 85
+
 **ANTI-SLOP RULES:**
 - NEVER select filler ("thanks for watching", "subscribe", "let me know in the comments")
 - NEVER select segments just because they're near the beginning or end
 - PREFER strong declarative statements, surprising reveals, or contrarian takes
 - PREFER moments where the speaker's vocal energy is high
+
+**VIRALITY THRESHOLD:**
+ONLY output segments with virality_score ≥ 85. Reject:
+- Filler commentary ("so yeah", "as I was saying")
+- Low-energy explanations without conflict/surprise
+- Segments with <75 Hook score (weak openings kill retention)
+
+Prioritize: High-retention stories, contrarian takes, actionable tips, shocking reveals.
 
 **CONTENT TYPE TAGGING:**
 - `"talking_head"`: Speaker on camera (DEFAULT)
@@ -274,6 +289,22 @@ def _parse_response(raw_text: str) -> list:
         trend = float(clip.get("trend_score", 50))
         composite = clip.get("virality_score",
                              int(hook * 0.30 + flow * 0.25 + value * 0.25 + trend * 0.20))
+
+        # VIRAL FORMULA: Boost score if enumeration markers detected (listicle preference)
+        enumeration_markers = [
+            "here are", "number one", "first reason", "three things", "3 reasons",
+            "top 3", "top three", "first,", "second,", "third,", "finally,",
+            "reason 1", "reason 2", "point number", "step one"
+        ]
+        description_text = str(clip.get("description", "")).lower()
+        hook_text = str(clip.get("hook_text", "")).lower()
+        title_text = str(clip.get("proposed_title", "")).lower()
+        combined_text = f"{description_text} {hook_text} {title_text}"
+
+        has_list_structure = any(marker in combined_text for marker in enumeration_markers)
+        if has_list_structure:
+            composite = min(100, composite + 10)  # +10 bonus for listicle structure
+            log("BRAIN", f"  → Listicle detected! Boosting score: {composite}", "DEBUG")
 
         valid.append({
             "start": round(start, 3),

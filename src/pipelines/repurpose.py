@@ -19,13 +19,13 @@ from config import (
     PROCESSED_DIR, TEMP_DIR, POLL_INTERVAL_SECONDS,
     GOOGLE_API_KEY, OPENAI_API_KEY, LLM_PROVIDER,
 )
-from modules.utils import log
-from modules.ingest import download_video, is_valid_youtube_url
-from modules.transcribe import transcribe_video, refine_timestamps, get_words_in_range
-from modules.brain import analyze_transcript
-from modules.director import analyze_scene
-from modules.editor import render_short
-from modules.distributor import schedule_posts
+from src.modules.utils import log
+from src.modules.ingest import download_video, is_valid_youtube_url
+from src.modules.transcribe import transcribe_video, refine_timestamps, get_words_in_range
+from src.modules.brain import analyze_transcript
+from src.modules.director import analyze_scene
+from src.modules.editor import render_short
+from src.modules.distributor import schedule_posts
 
 async def run_pipeline(url_arg: str = None):
     """
@@ -112,8 +112,14 @@ def process_video(url: str):
     motion_score = video_info.get("motion_score", "unknown")
     clips = analyze_transcript(full_text, metadata, motion_score=motion_score)
 
+    # ENGAGEMENT FILTER: Only keep top-tier clips (virality_score >= 85)
+    clips = [c for c in clips if c.get("virality_score", 0) >= 85]
+    clips = clips[:MAX_CLIPS_PER_VIDEO]  # Hard cap at 3 (quality over quantity)
+
+    log("REPURPOSE", f"After filtering: {len(clips)} clips passed virality threshold (≥85)")
+
     if not clips:
-        raise RuntimeError("Brain found no viral segments in this video")
+        raise RuntimeError("Brain found no viral segments in this video (no clips passed virality_score ≥ 85)")
 
     # ═══ PHASE 4-5: DIRECTOR + EDITOR ════════
     rendered_paths = []

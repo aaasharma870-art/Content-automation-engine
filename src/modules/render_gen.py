@@ -3,7 +3,7 @@ import os
 import math
 import subprocess
 from pathlib import Path
-from modules.utils import log, get_ffmpeg_bin
+from src.modules.utils import log, get_ffmpeg_bin
 from config import USE_NVENC, TARGET_WIDTH, TARGET_HEIGHT, FFMPEG_THREADS, OUTPUT_DIR
 
 def _escape_path(path: str) -> str:
@@ -194,44 +194,48 @@ def _create_slideshow(images: list, duration: float) -> str:
 
 def _create_flash_cut_filter(stream_label, duration=4.0):
     """
-    Generate randomized 'Flash Cut' filter for video clips.
-    Uses scale+crop with animated expressions (NOT zoompan, which is image-only).
-    Patterns:
-    A: Standard (Wide -> Zoom -> Pan)
-    B: Impact (Zoom In -> Pull Back)
-    C: Chaos (Step Zooms)
+    Generate 3-stage Flash Cut filter implementing the Luc Boulch viral formula.
+
+    The 3-Shot Rule: Every 4-second clip is divided into 3 distinct visual shots:
+    - Shot 1 (0-1.3s): Wide — centered, establishes context
+    - Shot 2 (1.3-2.6s): Zoom 150% — crop from top-left to simulate zoom-in
+    - Shot 3 (2.6-4.0s): Pan Left at Zoom 120% — animated pan from right to left
+
+    Syncs with micro-SFX at 1.4s and 2.8s for maximum engagement.
+    Uses FFmpeg's conditional expressions: if(lt(t, threshold), value_if_true, value_if_false)
     """
-    import random
-    
-    patterns = ["A", "B", "C"]
-    choice = random.choice(patterns)
-    
-    # For video inputs: scale UP first, then use animated crop to simulate zoom/pan.
-    # Scale to 1.5x the target (1620x2880), then crop 1080x1920 with moving offsets.
-    
-    sw = int(1080 * 1.5)  # 1620
-    sh = int(1920 * 1.5)  # 2880
-    tw = 1080
-    th = 1920
-    
-    # max offset: sw - tw = 540, sh - th = 960
-    # 't' = time in seconds in FFmpeg expressions
-    
-    # Pattern A: Start centered, then pan right over time
-    if choice == "A":
-        x_expr = f"min(t*50,{sw - tw})"  # Pan right slowly
-        y_expr = f"{(sh - th) // 2}"     # Center vertically
-        
-    # Pattern B: Start zoomed (top-left crop), drift to center
-    elif choice == "B":
-        x_expr = f"min(t*30,{(sw - tw) // 2})"
-        y_expr = f"min(t*50,{(sh - th) // 2})"
-        
-    # Pattern C: Oscillate (bounce)
-    else:
-        x_expr = f"({(sw - tw) // 2})*(1+sin(t*3))/2"
-        y_expr = f"({(sh - th) // 2})*(1+cos(t*2))/2"
-    
+
+    # Scale video to 1.5x the target size for crop headroom
+    sw = int(1080 * 1.5)  # 1620 (scaled width)
+    sh = int(1920 * 1.5)  # 2880 (scaled height)
+    tw = 1080  # Target width
+    th = 1920  # Target height
+
+    # ── Shot 1 (0-1.3s): Wide — Centered Crop ──
+    # Establishes full context, calm before the storm
+    x_wide = (sw - tw) // 2  # Center horizontally: 270
+    y_wide = (sh - th) // 2  # Center vertically: 480
+
+    # ── Shot 2 (1.3-2.6s): Zoom 150% — Top-Left Crop ──
+    # Simulates zoom-in by cropping from a different offset
+    x_zoom = 0  # Crop from left edge
+    y_zoom = 0  # Crop from top edge
+
+    # ── Shot 3 (2.6-4.0s): Pan Left at Zoom 120% — Animated Drift ──
+    # Pan from right edge to left edge over 1.4 seconds
+    x_pan_start = sw - tw  # Start at right edge: 540
+    x_pan_end = 0          # End at left edge: 0
+    y_pan = (sh - th) // 2  # Center vertically: 480
+
+    # Build conditional expressions using FFmpeg's 'if(condition, then, else)' syntax
+    # Structure: if(t < 1.3, shot1_value, if(t < 2.6, shot2_value, shot3_value))
+
+    # X-axis: Wide center -> Zoom left -> Pan left (right to left drift)
+    x_expr = f"if(lt(t,1.3),{x_wide},if(lt(t,2.6),{x_zoom},{x_pan_start}-((t-2.6)/1.4)*{x_pan_start}))"
+
+    # Y-axis: Wide center -> Zoom top -> Pan center
+    y_expr = f"if(lt(t,1.3),{y_wide},if(lt(t,2.6),{y_zoom},{y_pan}))"
+
     return (
         f"[{stream_label}]scale={sw}:{sh}:force_original_aspect_ratio=disable,"
         f"crop={tw}:{th}:{x_expr}:{y_expr},"

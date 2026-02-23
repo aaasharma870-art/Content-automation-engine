@@ -5,7 +5,7 @@ import gc
 from diffusers import StableVideoDiffusionPipeline, AutoPipelineForText2Image
 from diffusers.utils import export_to_video
 from config import USE_LOCAL_GENERATION, GPU_VRAM_LIMIT, TEMP_DIR
-from modules.utils import log
+from src.modules.utils import log
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
