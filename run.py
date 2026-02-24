@@ -43,30 +43,48 @@ async def main():
         print("\nSelect Mode:")
         print(f"{Fore.YELLOW}[1]{Style.RESET_ALL} Repurpose Video (URL -> Viral Shorts)")
         print(f"{Fore.GREEN}[2]{Style.RESET_ALL} Generate New (Topic -> AI Story)")
+        print(f"{Fore.MAGENTA}[3]{Style.RESET_ALL} Reddit Story (Subreddit -> TTS + Gameplay)")
         print(f"{Fore.RED}[q]{Style.RESET_ALL} Quit")
-        
+
         choice = input("\n> ").strip().lower()
-        
+
         if choice == 'q':
             print("Exiting...")
             break
-            
+
         elif choice == '1':
-            from pipelines import repurpose
+            from src.pipelines import repurpose
             print(f"\n{Fore.CYAN}--- Mode 1: YT Clipper ---{Style.RESET_ALL}")
             url = input("Enter YouTube URL (leave blank to check queue.txt): ").strip()
             if url:
                 await repurpose.run_pipeline(url)
             else:
-                # Run queue processing
                 await repurpose.run_pipeline()
-                
+
         elif choice == '2':
-            from pipelines import generate
+            from src.pipelines import generate
             print(f"\n{Fore.CYAN}--- Mode 2: Story Generator ---{Style.RESET_ALL}")
-            # The generate pipeline asks for topic internally if None passed
             await generate.run_pipeline()
-            
+
+        elif choice == '3':
+            from src.pipelines import reddit
+            print(f"\n{Fore.MAGENTA}--- Mode 3: Reddit Story ---{Style.RESET_ALL}")
+            subreddit = input("Enter subreddit (default: TrueOffMyChest): ").strip()
+            if not subreddit:
+                subreddit = "TrueOffMyChest"
+            background = input("Enter gameplay video path (leave blank for auto): ").strip()
+            if not background:
+                from config import GAMEPLAY_DIR
+                gameplay_files = list(GAMEPLAY_DIR.glob("*.mp4"))
+                background = str(gameplay_files[0]) if gameplay_files else ""
+            if background:
+                reddit.run_reddit_pipeline(
+                    background_source=background,
+                    subreddit=subreddit,
+                )
+            else:
+                print(f"{Fore.RED}No gameplay video found. Add .mp4 files to assets/gameplay/{Style.RESET_ALL}")
+
         else:
             print("Invalid selection.")
 

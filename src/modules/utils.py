@@ -1,29 +1,16 @@
+"""
+utils.py - Shared Utilities for Pipeline Modules
+===================================================
+Provides FFmpeg/FFprobe binary discovery and re-exports the canonical logger.
+"""
 
 import os
 import sys
 import shutil
 from pathlib import Path
-from colorama import init, Fore, Style
 
-# Initialize Colorama
-init(autoreset=True)
-if sys.platform == "win32":
-    sys.stdout.reconfigure(encoding='utf-8')
-
-def log(module: str, message: str, level: str = "INFO"):
-    """
-    Structured logging with colors.
-    Levels: INFO, WARN, ERR, OK, RENDER
-    """
-    ts = ""  # Timestamp could be added
-    
-    color = Fore.WHITE
-    if level == "WARN": color = Fore.YELLOW
-    if level == "ERR": color = Fore.RED
-    if level == "OK": color = Fore.GREEN
-    if level == "RENDER": color = Fore.CYAN
-    
-    print(f"{Fore.CYAN}[{module}]{Style.RESET_ALL} {color}{message}")
+# Re-export the canonical logger so all modules can use `from src.modules.utils import log`
+from src.utils.logger import log  # noqa: F401
 
 def get_ffmpeg_bin():
     """

@@ -34,7 +34,7 @@ def download_fonts():
                         with open(path, "wb") as f:
                             f.write(r.content)
                         print(f"[OK] Saved to {path}")
-                     except:
+                     except Exception:
                         pass
         else:
             print(f"[OK] {name} already exists.")

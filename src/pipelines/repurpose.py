@@ -18,6 +18,7 @@ from config import (
     QUEUE_FILE, HISTORY_FILE, ERRORS_LOG,
     PROCESSED_DIR, TEMP_DIR, POLL_INTERVAL_SECONDS,
     GOOGLE_API_KEY, OPENAI_API_KEY, LLM_PROVIDER,
+    MAX_CLIPS_PER_VIDEO,
 )
 from src.modules.utils import log
 from src.modules.ingest import download_video, is_valid_youtube_url
@@ -166,10 +167,6 @@ def process_video(url: str):
         log("REPURPOSE", f"[PHASE 5/6] RENDERING CLIP {clip_num}/{len(clips)}")
 
         # ── B-Roll search ──
-
-
-        # ── B-Roll search ──
-        # Re-enabled with stricter threshold (0.25) to avoid bad matches
         broll_insert = None
         broll_query = clip.get("broll_query", "")
         clip_duration = clip["end"] - clip["start"]
@@ -216,6 +213,9 @@ def process_video(url: str):
         proposed = clip.get("proposed_title", "")
         safe_proposed = re.sub(r'[^\w\s-]', '', proposed)[:30].strip()
         output_name = f"{safe_title}_{safe_proposed}_S{score}.mp4"
+
+        # Tag clip with content mode for downstream context-aware decisions
+        clip["content_mode"] = "repurpose"
 
         output_path = render_short(
             video_path=video_path,
