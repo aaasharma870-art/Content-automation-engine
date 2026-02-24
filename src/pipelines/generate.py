@@ -1,10 +1,18 @@
+"""
+generate.py - AI Story Generation Pipeline
+=============================================
+Topic -> LLM Story -> TTS Audio -> AI Images -> Rendered Short
+"""
 
 import asyncio
-import shutil
-import os
-from config import TEMP_DIR, DEFAULT_MODE, ASSETS_DIR
-from modules import miner, vision, audio, render_gen as render, validator
+from pathlib import Path
+
+from config import TEMP_DIR, DEFAULT_MODE
+from src.modules import miner, vision, audio, render_gen as render
+from src.modules.validator import validate_assets
+from src.modules.editor import select_background_music
 from src.modules.utils import log
+
 
 async def run_pipeline(topic: str = None):
     """
@@ -16,9 +24,9 @@ async def run_pipeline(topic: str = None):
     log("ORCHESTRATOR", f"Starting generation for: {topic}", "INFO")
 
     try:
-        # 1. Miner
+        # 1. Miner: Generate story via LLM
         story_data = await miner.generate_story(topic)
-        if not story_data: 
+        if not story_data:
             return
 
         await miner.update_gameplay_library()
@@ -26,34 +34,35 @@ async def run_pipeline(topic: str = None):
         if not gameplay_files:
             log("ORCHESTRATOR", "No gameplay found!", "ERR")
             return
-        gameplay = str(gameplay_files[0]) # Pick first for now
+        gameplay = str(gameplay_files[0])
 
         # 2. Parallel Generation
         story_text = f"{story_data['hook']} {story_data['body']} {story_data['cta']}"
-        
+
         # Audio (Voice)
         voice_path = TEMP_DIR / "narration.mp3"
         await audio.generate_narration(story_text, output_path=str(voice_path))
-        
-        # Subtitles (Sync) -> Get duration from this
+
+        # Subtitles (Sync)
         words = audio.generate_subtitles(str(voice_path))
         voice_duration = words[-1]['end'] if words else 30.0
-        
+
         # Audio (Mix with Music + SFX)
         final_audio_path = TEMP_DIR / "final_mix.mp3"
-        
-        # Pick Random Music
-        music_files = list((ASSETS_DIR / "music").glob("*.mp3"))
-        music_path = str(music_files[0]) if music_files else None
-        
+
+        # Context-aware music selection (not random)
+        music_path = select_background_music(
+            visual_style=None,
+            duration=voice_duration,
+            content_mode="generate",
+            proposed_title=story_data.get("hook", topic),
+        )
+
         if music_path:
-            # Calculate Scene Changes for SFX
-            # We have N scenes. Duration is voice_duration.
-            # Assuming equal distribution for now (naive but working)
             num_scenes = len(story_data.get('keywords_for_image_gen', []))
             scene_duration = voice_duration / max(1, num_scenes)
-            scene_timestamps = [i * scene_duration for i in range(1, num_scenes)] # skip 0.0
-            
+            scene_timestamps = [i * scene_duration for i in range(1, num_scenes)]
+
             audio.duck_audio(
                 voice_path=str(voice_path),
                 music_path=music_path,
@@ -62,11 +71,11 @@ async def run_pipeline(topic: str = None):
                 scene_changes=scene_timestamps
             )
         else:
-            final_audio_path = voice_path # Fallback if no music
-        
+            final_audio_path = voice_path
+
         # Vision (Parallel)
         images = await vision.generate_scenes(story_data)
-        
+
         # 3. Validation
         assets = {
             'topic': topic,
@@ -75,15 +84,13 @@ async def run_pipeline(topic: str = None):
             'images': images,
             'gameplay': gameplay
         }
-        
-        # Simple validation for now
-        # if not validator.validate_assets(assets):
-        #     log("ORCHESTRATOR", "Validation Failed.", "ERR")
-        #     return
-            
+
+        if not validate_assets(assets):
+            log("ORCHESTRATOR", "Validation Failed. Attempting render anyway...", "WARN")
+
         # 4. Render
         output = render.build_video(DEFAULT_MODE, assets)
-        log("ORCHESTRATOR", f" Pipeline Complete! Video: {output}", "OK")
+        log("ORCHESTRATOR", f"Pipeline Complete! Video: {output}", "OK")
 
     except Exception as e:
         log("ORCHESTRATOR", f"Pipeline failed: {e}", "ERR")

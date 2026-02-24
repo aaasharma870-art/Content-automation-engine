@@ -49,7 +49,7 @@ async def main():
         ffmpeg_bin = get_ffmpeg_bin()
         ffmpeg_dir = str(Path(ffmpeg_bin).parent)
         os.environ["PATH"] += os.pathsep + ffmpeg_dir
-    except:
+    except Exception:
         pass
 
     while True:
@@ -65,15 +65,15 @@ async def main():
             break
 
         if choice == '1':
-            from pipelines import repurpose
+            from src.pipelines import repurpose
             await repurpose.run_pipeline()
 
         elif choice == '2':
-            from pipelines import generate
+            from src.pipelines import generate
             await generate.run_pipeline()
 
         elif choice == '3':
-            from pipelines import reddit
+            from src.pipelines import reddit
             print("\n" + "="*50)
             print("REDDIT STORY MODE")
             print("="*50)
@@ -82,7 +82,7 @@ async def main():
                 print(f"{Fore.RED}ERROR: File not found: {bg_path}{Style.RESET_ALL}")
                 continue
             subreddit = input("Subreddit (default: TrueOffMyChest): ").strip() or "TrueOffMyChest"
-            await reddit.build_reddit_video(bg_path, subreddit)
+            reddit.run_reddit_pipeline(background_source=bg_path, subreddit=subreddit)
 
         else:
             print("Invalid choice.")

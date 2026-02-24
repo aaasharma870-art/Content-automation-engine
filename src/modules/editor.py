@@ -134,62 +134,113 @@ def remove_silence(input_path: str, output_path: str) -> str:
     return output_path
 
 
-def select_background_music(visual_style: str = None, duration: float = 60.0, voice_path: str = None) -> str | None:
+def select_background_music(visual_style: str = None, duration: float = 60.0,
+                            content_mode: str = None, proposed_title: str = None) -> str | None:
     """
-    Select background music matching visual style.
+    Select background music with context-aware matching.
 
-    Uses subdirectory structure for style-based selection:
-    - assets/music/cinematic/ → "dark", "moody", "luxury"
-    - assets/music/upbeat/ → "energetic", "bright"
-    - assets/music/neutral/ → "vlog", "minimal"
+    Selection priority:
+    1. Content mode (reddit, generate, repurpose) -> preferred mood category
+    2. Visual style from Brain (e.g., "dark moody") -> style-based subdirectory
+    3. Title keyword scanning -> genre hints from content
+    4. Random from best-matching pool
+
+    Directory structure:
+    - assets/music/cinematic/   -> dark, moody, luxury, dramatic content
+    - assets/music/upbeat/      -> energetic, bright, motivational content
+    - assets/music/neutral/     -> vlog, minimal, casual content
+    - assets/music/tense/       -> horror, thriller, suspense stories
+    - assets/music/lofi/        -> reddit stories, chill narration
+    - assets/music/             -> fallback pool (root)
 
     Args:
         visual_style: Style keyword from Brain (e.g., "dark moody", "bright energetic")
-        duration: Target duration (unused, kept for compatibility)
-        voice_path: Legacy parameter (unused, kept for compatibility)
+        duration: Target duration for logging
+        content_mode: Pipeline mode ("reddit", "generate", "repurpose")
+        proposed_title: Clip title for keyword-based genre hints
 
     Returns:
         Path to selected music file, or None if no music available
     """
+    MUSIC_EXTENSIONS = ["*.mp3", "*.wav", "*.m4a", "*.ogg", "*.flac"]
 
-    # Map visual_style keywords to music subdirectories
     style_map = {
-        "dark": "cinematic", "moody": "cinematic", "luxury": "cinematic", "cinematic": "cinematic",
+        "dark": "cinematic", "moody": "cinematic", "luxury": "cinematic",
+        "cinematic": "cinematic", "dramatic": "cinematic",
         "energetic": "upbeat", "bright": "upbeat", "vibrant": "upbeat",
+        "motivational": "upbeat", "hype": "upbeat",
         "vlog": "neutral", "minimal": "neutral", "casual": "neutral",
+        "horror": "tense", "thriller": "tense", "suspense": "tense",
+        "scary": "tense", "creepy": "tense",
+        "chill": "lofi", "calm": "lofi", "story": "lofi", "narration": "lofi",
     }
 
-    subdir = "neutral"  # Default fallback
-    if visual_style:
+    mode_defaults = {
+        "reddit": "lofi",
+        "generate": "cinematic",
+        "repurpose": "neutral",
+    }
+
+    subdir = None
+
+    # Signal 1: Title keywords (strongest genre signal)
+    if proposed_title:
+        title_lower = proposed_title.lower()
+        title_keywords = {
+            "horror": "tense", "scary": "tense", "creepy": "tense",
+            "revenge": "tense", "murder": "tense", "dark": "cinematic",
+            "money": "upbeat", "rich": "upbeat", "hustle": "upbeat",
+            "motivat": "upbeat", "success": "upbeat", "grind": "upbeat",
+            "hack": "upbeat", "secret": "cinematic", "luxury": "cinematic",
+            "chill": "lofi", "story": "lofi", "confess": "lofi",
+        }
+        for keyword, folder in title_keywords.items():
+            if keyword in title_lower:
+                subdir = folder
+                break
+
+    # Signal 2: Visual style from Brain
+    if visual_style and not subdir:
         style_lower = visual_style.lower()
         for keyword, folder in style_map.items():
             if keyword in style_lower:
                 subdir = folder
                 break
 
-    # Try subdirectory first
-    music_path = MUSIC_DIR / subdir
-    if not music_path.exists():
-        log("EDITOR", f"Music subdirectory '{subdir}' not found, falling back to root", "WARN")
-        music_path = MUSIC_DIR  # Fallback to root directory
+    # Signal 3: Content mode default
+    if not subdir and content_mode:
+        subdir = mode_defaults.get(content_mode, "neutral")
 
-    # Find all music files
+    if not subdir:
+        subdir = "neutral"
+
+    # Collect candidates from the matched subdirectory
     candidates = []
-    for ext in ["*.mp3", "*.wav", "*.m4a", "*.ogg", "*.flac"]:
-        candidates.extend(music_path.glob(ext))
+    music_subdir = MUSIC_DIR / subdir
+    if music_subdir.exists():
+        for ext in MUSIC_EXTENSIONS:
+            candidates.extend(music_subdir.glob(ext))
 
-    # If subdirectory is empty, try root
-    if not candidates and music_path != MUSIC_DIR:
-        log("EDITOR", f"No music in '{subdir}/', trying root directory", "WARN")
-        for ext in ["*.mp3", "*.wav", "*.m4a", "*.ogg", "*.flac"]:
+    # Fallback: try root music directory
+    if not candidates:
+        if music_subdir.exists():
+            log("EDITOR", f"No music in '{subdir}/', trying root directory", "WARN")
+        for ext in MUSIC_EXTENSIONS:
             candidates.extend(MUSIC_DIR.glob(ext))
+
+    # Final fallback: search all subdirectories recursively
+    if not candidates:
+        for ext in MUSIC_EXTENSIONS:
+            candidates.extend(MUSIC_DIR.rglob(ext))
 
     if not candidates:
         log("EDITOR", "No music files found in assets/music/", "WARN")
         return None
 
+    candidates = list({str(c): c for c in candidates}.values())
     selected = str(random.choice(candidates))
-    log("EDITOR", f"Music selected: {Path(selected).name} (style: {visual_style or 'default'})", "OK")
+    log("EDITOR", f"Music selected: {Path(selected).name} "
+        f"(mood: {subdir}, style: {visual_style or 'default'}, mode: {content_mode or '?'})", "OK")
     return selected
 
 
@@ -396,15 +447,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     lines = _group_words_smart(words, CAPTION_MAX_CHARS)
 
     dialogue_lines = []
-    import random
 
-    # Kinetic positioning: randomize position every 2 lines to prevent habituation
-    # Safe zone: X=440-640 (center ±100px), Y=700-1100 (above TikTok UI, readable zone)
-    def get_random_position():
-        """Generate random (x, y) within safe readable zone."""
-        x = random.randint(440, 640)  # Center horizontal with slight offset
-        y = random.randint(700, 1100)  # Bottom-middle zone, above UI elements
-        return x, y
+    # Kinetic positioning: subtle vertical shifts every 2 lines to prevent habituation
+    # Safe zone: horizontally centered, vertically within 40%-60% (above TikTok bottom UI)
+    CENTER_X = TARGET_WIDTH // 2   # 540
+    Y_POSITIONS = [820, 880, 940, 860, 900]  # Pre-defined vertical positions (safe zone)
 
     for i, line_words in enumerate(lines):
         if not line_words:
@@ -416,7 +463,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         start_ts = _seconds_to_ass(line_start)
         end_ts = _seconds_to_ass(line_end)
 
-        # Build karaoke text with \kf tags + emoji injection
+        # Build karaoke text with \kf tags + emoji injection + pop animation
         karaoke_text = ""
         for w in line_words:
             duration_cs = int((w["end"] - w["start"]) * 100)
@@ -439,18 +486,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         karaoke_text = karaoke_text.strip()
 
-        # KINETIC JUMPY CAPTIONS: Randomize position every 2 lines (every ~2-4 seconds)
-        # This prevents viewer habituation and forces active eye tracking
-        if i % 2 == 0:
-            x, y = get_random_position()
-            position_override = f"{{\\pos({x},{y})}}"
-        else:
-            # Alternate lines: use slightly different position for "bounce" effect
-            x, y = get_random_position()
-            position_override = f"{{\\pos({x},{y})}}"
+        # Subtle kinetic positioning: small vertical shift every 2 lines
+        y = Y_POSITIONS[i % len(Y_POSITIONS)]
+        position_override = f"{{\\an5\\pos({CENTER_X},{y})}}"
 
-        # Inject position override at start of karaoke text
-        karaoke_text = f"{position_override}{karaoke_text}"
+        # Add pop-in animation for each line (scale from 90% to 100% in 100ms)
+        pop_in = r"{\fscx90\fscy90\t(0,100,\fscx100\fscy100)}"
+
+        karaoke_text = f"{position_override}{pop_in}{karaoke_text}"
 
         dialogue_lines.append(
             f"Dialogue: 0,{start_ts},{end_ts},Default,,0,0,0,,{karaoke_text}"
@@ -575,7 +618,12 @@ def render_short(
     # ── Step 2: Background music + sidechain ───
     impact_moments = clip_data.get("impact_moments", [])
     visual_style = clip_data.get("visual_style", "")
-    music_path = select_background_music(visual_style=visual_style, duration=clip_duration)
+    music_path = select_background_music(
+        visual_style=visual_style,
+        duration=clip_duration,
+        content_mode=clip_data.get("content_mode", "repurpose"),
+        proposed_title=clip_data.get("proposed_title", ""),
+    )
     if music_path:
         build_sidechain_audio(clean_audio, music_path, final_audio, clip_duration,
                               impact_moments=impact_moments)
@@ -664,31 +712,53 @@ def render_short(
             log("RENDER", f"LUT file not found: {lut_path} (skipping)", "WARN")
 
     # ── Step 4c: YouTube Shorts Hook (3-Second Pattern Interrupt) ──
-    # Add aggressive zoom-in effect in first 0.8s to prevent swipe-away
-    # Uses conditional scale: zoom from 1.0x to 1.15x over first 0.8s, then hold
+    # Zoom in 1.0x -> 1.12x over first 0.6s, then ease back to 1.0x over 0.6-2.0s
+    # Creates a "punch in" effect that grabs attention then settles naturally
+    zoom_expr = (
+        "if(lt(t,0.6),"
+        "1+0.12*t/0.6,"                        # 0-0.6s: zoom in to 1.12x
+        "if(lt(t,2.0),"
+        "1.12-0.12*(t-0.6)/1.4,"               # 0.6-2.0s: ease back to 1.0x
+        "1))"                                    # 2.0s+: hold at 1.0x
+    )
     filter_complex = filter_complex.replace(
         "[vout]",
-        f"scale=w=iw*if(lt(t,0.8),1+0.15*t/0.8,1.15):h=ih*if(lt(t,0.8),1+0.15*t/0.8,1.15),"
+        f"scale=w=iw*({zoom_expr}):h=ih*({zoom_expr}),"
         f"crop={TARGET_WIDTH}:{TARGET_HEIGHT}[vout]"
     )
-    log("RENDER", "YouTube Shorts Hook: 3-second zoom pattern interrupt enabled")
+    log("RENDER", "YouTube Shorts Hook: punch-zoom pattern interrupt enabled")
 
     # ── Step 4d: Signature Brand Watermark (Channel Identity) ──
-    from config import ENABLE_BRAND_WATERMARK, BRAND_COLOR_CYAN
+    from config import ENABLE_BRAND_WATERMARK, BRAND_COLOR_CYAN, FONTS_DIR
     if ENABLE_BRAND_WATERMARK:
-        # Add subtle brand identifier in top-right corner (neon cyan glow)
-        # Uses drawtext with fade-in effect for professional look
-        brand_text = "AutoShorts"  # Change this to your channel name
-        filter_complex = filter_complex.replace(
-            "[vout]",
-            f"drawtext=text='{brand_text}':"
-            f"fontfile=/Windows/Fonts/arial.ttf:"  # Fallback to system font
-            f"fontsize=24:"
-            f"fontcolor=00FFFF@0.8:"  # Cyan with 80% opacity
-            f"x=w-tw-20:y=20:"  # Top-right corner with 20px padding
-            f"borderw=2:bordercolor=black@0.5[vout]"
-        )
-        log("RENDER", f"Brand watermark added: {brand_text}")
+        brand_text = "AutoShorts"
+        # Cross-platform font resolution
+        font_path = None
+        font_candidates = [
+            FONTS_DIR / "Montserrat-Bold.ttf",
+            FONTS_DIR / "DejaVuSans-Bold.ttf",
+            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+            Path("/System/Library/Fonts/Helvetica.ttc"),
+            Path("C:/Windows/Fonts/arial.ttf"),
+        ]
+        for candidate in font_candidates:
+            if candidate.exists():
+                font_path = str(candidate).replace("\\", "/").replace(":", "\\:")
+                break
+
+        if font_path:
+            filter_complex = filter_complex.replace(
+                "[vout]",
+                f"drawtext=text='{brand_text}':"
+                f"fontfile='{font_path}':"
+                f"fontsize=24:"
+                f"fontcolor=00FFFF@0.8:"
+                f"x=w-tw-20:y=20:"
+                f"borderw=2:bordercolor=black@0.5[vout]"
+            )
+            log("RENDER", f"Brand watermark added: {brand_text}")
+        else:
+            log("RENDER", "No font found for watermark, skipping", "WARN")
 
     # ── Step 5: Build hwaccel + encode command ─
     encoder, encoder_opts = _get_encoder()
@@ -721,7 +791,7 @@ def render_short(
     stripped = _strip_complex_filters(filter_complex)
     render_attempts.append({
         "enc": "libx264",
-        "opts": ["-preset", "fast", "-crf", "23"],
+        "opts": ["-preset", "fast", "-crf", "23", "-pix_fmt", "yuv420p"],
         "filt": stripped,
         "hwaccel": [],
         "label": "libx264_safe",
@@ -755,6 +825,12 @@ def render_short(
         log("RENDER", f"Attempt '{attempt['label']}' failed: {last_error[:200]}...", "WARN")
     else:
         raise RuntimeError(f"All render attempts failed. Last error: {last_error}")
+
+    # ── Post-render validation ────────────────
+    from src.modules.validator import validate_rendered_output
+    validation = validate_rendered_output(output_path)
+    if not validation["valid"]:
+        log("RENDER", f"Post-render validation warnings: {validation['errors']}", "WARN")
 
     # ── Cleanup ────────────────────────────────
     for f in [raw_audio, norm_audio, clean_audio, final_audio, final_normalized, ass_path]:

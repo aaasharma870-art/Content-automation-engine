@@ -92,6 +92,11 @@ Identify 1-3 timestamps within each segment where a dramatic beat, topic shift, 
 These are used for transition SFX (whoosh/impact sounds) placement.
 Field: `impact_moments` (list of float offsets from segment start, in seconds)
 
+**CONTENT MOOD:**
+Classify the emotional register of each segment for background music selection.
+One of: "cinematic", "upbeat", "tense", "lofi", "neutral"
+Field: `content_mood`
+
 **VISUAL VIABILITY:**
 {visual_viability_context}
 Before finalizing each segment, ask: "Does this segment have enough visual movement, expression changes, or scene variety to hold attention on a phone screen?"
@@ -127,6 +132,7 @@ Field: `visual_viability_score` (0-99, for debugging)
     "visual_style": "high-tech financial data visualization",
     "emphasis_words": [{{"word": "never", "type": "negative"}}, {{"word": "indicator", "type": "key_noun"}}, {{"word": "hidden", "type": "key_adjective"}}],
     "impact_moments": [8.5, 22.0],
+    "content_mood": "cinematic",
     "visual_viability_score": 75
   }}
 ]
@@ -322,6 +328,7 @@ def _parse_response(raw_text: str) -> list:
             "broll_query": str(clip.get("broll_query", "")),
             "broll_insert_time": float(clip.get("broll_insert_time", 0)),
             "visual_style": str(clip.get("visual_style", "cinematic")),
+            "content_mood": str(clip.get("content_mood", "neutral")),
             "emphasis_words": clip.get("emphasis_words", []),
             "impact_moments": clip.get("impact_moments", []),
             "visual_viability_score": int(clip.get("visual_viability_score", 50)),

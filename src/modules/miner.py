@@ -86,7 +86,7 @@ def _is_1080p(video_path):
     try:
         height = int(subprocess.check_output(cmd).decode().strip())
         return height >= 1080
-    except:
+    except Exception:
         return False
 
 async def _process_gameplay(raw_path):

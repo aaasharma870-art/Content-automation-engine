@@ -16,6 +16,7 @@ Then paste YouTube URLs into queue.txt and save. Shorts appear in output/.
 """
 
 import os
+import re
 import sys
 import time
 import shutil
@@ -28,24 +29,16 @@ from colorama import init, Fore, Style
 init(autoreset=True)
 
 # ── Local modules ──────────────────────────────
-import sys
-import os
-print(f"DEBUG: CWD={os.getcwd()}")
-print(f"DEBUG: sys.path={sys.path}")
-import config
-print(f"DEBUG: config file={config.__file__}")
-print(f"DEBUG: config dir={dir(config)}")
-
 from config import (
     QUEUE_FILE, HISTORY_FILE, ERRORS_LOG,
     OUTPUT_DIR, TEMP_DIR, POLL_INTERVAL_SECONDS,
     GOOGLE_API_KEY,
 )
-from modules.ingest import download_video, is_valid_youtube_url
-from modules.transcribe import transcribe_video, refine_timestamps, get_words_in_range
-from modules.brain import analyze_transcript
-from modules.director import analyze_scene
-from modules.editor import render_short
+from src.modules.ingest import download_video, is_valid_youtube_url
+from src.modules.transcribe import transcribe_video, refine_timestamps, get_words_in_range
+from src.modules.brain import analyze_transcript
+from src.modules.director import analyze_scene
+from src.modules.editor import render_short
 
 
 # ══════════════════════════════════════════════
@@ -316,15 +309,10 @@ def _preflight_checks():
         print()
         
         # Only hard-fail on API key (others might be okay)
-        # Only hard-fail on API key (others might be okay)
         if "API_KEY" in str(errors):
             print(f"{Fore.YELLOW}  Please check your .env file for the correct API key.{Style.RESET_ALL}\n")
     else:
         print(f"{Fore.GREEN}[PREFLIGHT]{Style.RESET_ALL} ✓ All systems operational.\n")
-
-
-# Need this import in the process_video scope
-import re
 
 
 if __name__ == "__main__":

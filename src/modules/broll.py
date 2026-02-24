@@ -305,10 +305,12 @@ def _extract_frames(video_path: str, num_frames: int) -> list:
     temp_dir = Path(video_path).parent
     frames = []
 
-    # Get video duration via ffprobe
+    # Get video duration via ffprobe (cross-platform safe)
     try:
+        from src.modules.utils import get_ffprobe_bin
+        ffprobe_bin = get_ffprobe_bin()
         result = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-show_entries",
+            [ffprobe_bin, "-v", "quiet", "-show_entries",
              "format=duration", "-of", "csv=p=0", video_path],
             capture_output=True, text=True, timeout=30
         )

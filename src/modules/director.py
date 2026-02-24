@@ -9,7 +9,6 @@ Handles 16:9 → 9:16 intelligent cropping:
 
 import cv2
 import numpy as np
-import mediapipe as mp
 from collections import deque
 from pathlib import Path
 
@@ -28,7 +27,7 @@ try:
     mp_face_mesh = mp.solutions.face_mesh
     HAS_MEDIAPIPE = True
 except (ImportError, AttributeError):
-    log("DIRECTOR", "MediaPipe broken. Using OpenCV fallback.", "WARN")
+    log("DIRECTOR", "MediaPipe not available. Using OpenCV fallback.", "WARN")
     HAS_MEDIAPIPE = False
     mp_face_mesh = None
 

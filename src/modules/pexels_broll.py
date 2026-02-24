@@ -42,17 +42,25 @@ def search_pexels_video(query: str, duration_max: int = 15, **kwargs) -> dict | 
         log("PEXELS", "requests not installed", "ERROR")
         return None
 
-    # Enforce adaptive visual style
-    visual_style = kwargs.get("visual_style", "cinematic vertical 4k")
-    enhanced_query = f"{query} {visual_style} vertical"
-    
+    # Build contextual query: keep the semantic core, add quality modifiers
+    visual_style = kwargs.get("visual_style", "")
+    # Avoid appending overly generic style words that dilute search precision
+    style_suffix = ""
+    if visual_style:
+        # Only use style if it adds meaningful context (not just "cinematic")
+        useful_styles = [s for s in visual_style.lower().split()
+                         if s not in ("cinematic", "default", "standard", "normal")]
+        if useful_styles:
+            style_suffix = " " + " ".join(useful_styles[:2])
+
+    enhanced_query = f"{query}{style_suffix}"
     log("PEXELS", f"Searching Pexels for: \"{enhanced_query[:60]}\"...")
 
     headers = {"Authorization": PEXELS_API_KEY}
     params = {
         "query": enhanced_query,
-        "per_page": 5,
-        "orientation": "portrait",  # Prefer vertical footage for 9:16
+        "per_page": 10,
+        "orientation": "portrait",
     }
 
     try:
@@ -73,33 +81,50 @@ def search_pexels_video(query: str, duration_max: int = 15, **kwargs) -> dict | 
         log("PEXELS", "No results found on Pexels", "WARN")
         return None
 
-    # Pick the best short video (prefer shorter clips)
-    best = None
+    # Score and rank candidate videos by quality, duration fit, and resolution
+    scored_candidates = []
     for video in videos:
         dur = video.get("duration", 999)
-        if dur <= duration_max:
-            # Get the HD or SD video file
-            video_files = video.get("video_files", [])
-            # Prefer HD quality, portrait orientation
-            for vf in sorted(video_files, key=lambda x: x.get("height", 0), reverse=True):
-                if vf.get("height", 0) >= 720:
-                    best = {
-                        "download_url": vf["link"],
-                        "width": vf.get("width", 0),
-                        "height": vf.get("height", 0),
-                        "pexels_id": video["id"],
-                        "duration": dur,
-                    }
-                    break
-            if best:
+        if dur > duration_max:
+            continue
+
+        video_files = video.get("video_files", [])
+        # Find the best quality file (prefer >= 1080p, then >= 720p)
+        best_file = None
+        for vf in sorted(video_files, key=lambda x: x.get("height", 0), reverse=True):
+            h = vf.get("height", 0)
+            if h >= 720 and vf.get("link"):
+                best_file = vf
                 break
 
+        if not best_file and video_files:
+            best_file = video_files[0]
+
+        if best_file:
+            height = best_file.get("height", 0)
+            # Scoring: prefer 1080p+, portrait, and shorter duration
+            res_score = 2 if height >= 1080 else (1 if height >= 720 else 0)
+            dur_score = 1.0 - (dur / max(duration_max, 1))  # Shorter is better
+            scored_candidates.append({
+                "download_url": best_file["link"],
+                "width": best_file.get("width", 0),
+                "height": height,
+                "pexels_id": video["id"],
+                "duration": dur,
+                "_score": res_score + dur_score,
+            })
+
+    # Sort by composite score (best first)
+    scored_candidates.sort(key=lambda x: x["_score"], reverse=True)
+
+    best = scored_candidates[0] if scored_candidates else None
+
     if not best:
-        # Fallback: take any file from the first result
+        # Fallback: take any file from the first result regardless of duration
         video = videos[0]
         video_files = video.get("video_files", [])
         if video_files:
-            vf = video_files[0]
+            vf = sorted(video_files, key=lambda x: x.get("height", 0), reverse=True)[0]
             best = {
                 "download_url": vf["link"],
                 "width": vf.get("width", 0),

@@ -27,6 +27,7 @@ def log(module: str, message: str, level: str = "INFO"):
         "OK": Fore.GREEN,
         "WARN": Fore.YELLOW,
         "ERROR": Fore.RED,
+        "ERR": Fore.RED,
         "DEBUG": Fore.MAGENTA,
         "RENDER": Fore.RED,
     }
@@ -35,6 +36,7 @@ def log(module: str, message: str, level: str = "INFO"):
         "OK": "✓",
         "WARN": "⚠",
         "ERROR": "✗",
+        "ERR": "✗",
         "DEBUG": "⚙",
         "RENDER": "▶",
     }
