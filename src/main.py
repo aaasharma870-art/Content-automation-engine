@@ -82,7 +82,7 @@ async def main():
                 print(f"{Fore.RED}ERROR: File not found: {bg_path}{Style.RESET_ALL}")
                 continue
             subreddit = input("Subreddit (default: TrueOffMyChest): ").strip() or "TrueOffMyChest"
-            reddit.run_reddit_pipeline(background_source=bg_path, subreddit=subreddit)
+            await reddit.build_reddit_video(background_video=bg_path, subreddit=subreddit)
 
         else:
             print("Invalid choice.")

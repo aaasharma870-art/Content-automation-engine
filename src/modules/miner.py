@@ -157,6 +157,8 @@ async def generate_story(topic: str) -> dict:
         "body": "The main story, building tension.",
         "cta": "Call to action (e.g. Subscribe for Part 2)",
         "estimated_duration": 50,
+        "mood": "cinematic | upbeat | tense | lofi | neutral",
+        "visual_style": "dark moody | bright energetic | luxury minimal | etc.",
         "keywords_for_image_gen": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"]
     }}
     """
@@ -165,6 +167,10 @@ async def generate_story(topic: str) -> dict:
         response = await model.generate_content_async(draft_prompt)
         text = response.text.replace("```json", "").replace("```", "").strip()
         data = json.loads(text)
+        if "mood" not in data:
+            data["mood"] = "cinematic"
+        if "visual_style" not in data:
+            data["visual_style"] = "cinematic"
         log("MINER", "Draft generated. Running Critic Loop...", "INFO")
         
         # Step 2: Critic Loop

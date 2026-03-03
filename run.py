@@ -78,8 +78,8 @@ async def main():
                 gameplay_files = list(GAMEPLAY_DIR.glob("*.mp4"))
                 background = str(gameplay_files[0]) if gameplay_files else ""
             if background:
-                reddit.run_reddit_pipeline(
-                    background_source=background,
+                await reddit.build_reddit_video(
+                    background_video=background,
                     subreddit=subreddit,
                 )
             else:

@@ -21,6 +21,34 @@ from config import AYRSHARE_API_KEY
 from src.utils.logger import log
 
 
+def _next_peak_slot() -> datetime:
+    """
+    Find the next peak engagement window for TikTok/Reels/Shorts.
+    Peak hours (US Eastern): 7-9 AM, 12-2 PM, 7-10 PM.
+    Converts to UTC for API scheduling.
+    """
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
+    # Peak hours in UTC (Eastern + 5, accounting for major US audience)
+    # Morning: 12-14 UTC (7-9 AM ET)
+    # Lunch: 17-19 UTC (12-2 PM ET)
+    # Evening: 00-03 UTC next day (7-10 PM ET)
+    PEAK_HOURS_UTC = [12, 13, 17, 18, 0, 1, 2]
+
+    candidate = now + timedelta(hours=1)  # At least 1 hour from now
+    for _ in range(48):  # Search up to 48 hours ahead
+        if candidate.hour in PEAK_HOURS_UTC:
+            # Round to the nearest :00 or :30
+            if candidate.minute < 30:
+                candidate = candidate.replace(minute=0, second=0, microsecond=0)
+            else:
+                candidate = candidate.replace(minute=30, second=0, microsecond=0)
+            return candidate
+        candidate += timedelta(hours=1)
+
+    return now + timedelta(hours=1)  # Fallback
+
+
 def schedule_posts(
     video_paths: list,
     clip_metadata: list,
@@ -47,7 +75,7 @@ def schedule_posts(
         return _save_metadata_only(video_paths, clip_metadata, platforms)
 
     results = []
-    post_time = datetime.utcnow() + timedelta(hours=1)  # Start 1hr from now
+    post_time = _next_peak_slot()  # Schedule at next peak engagement window
 
     for i, (video_path, clip) in enumerate(zip(video_paths, clip_metadata)):
         title = clip.get("proposed_title", f"Short_{i+1}")
@@ -84,7 +112,8 @@ def schedule_posts(
                 "error": str(e),
             })
 
-        post_time += timedelta(hours=interval_hours)
+        # Space posts across different peak windows (not back-to-back)
+        post_time += timedelta(hours=max(interval_hours, 6))
 
     return results
 
