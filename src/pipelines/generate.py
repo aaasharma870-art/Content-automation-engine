@@ -50,12 +50,14 @@ async def run_pipeline(topic: str = None):
         # Audio (Mix with Music + SFX)
         final_audio_path = TEMP_DIR / "final_mix.mp3"
 
-        # Context-aware music selection (not random)
+        # Context-aware music selection
+        story_mood = story_data.get("mood", "cinematic")  # Miner should provide this
         music_path = select_background_music(
-            visual_style=None,
+            visual_style=story_data.get("visual_style", None),
             duration=voice_duration,
             content_mode="generate",
             proposed_title=story_data.get("hook", topic),
+            content_mood=story_mood,
         )
 
         if music_path:

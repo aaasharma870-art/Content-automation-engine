@@ -241,6 +241,24 @@ async def build_reddit_video(background_video: str, subreddit: str = "TrueOffMyC
     log("REDDIT", "Normalizing audio...")
     normalize_audio(audio_path, normalized_audio)
 
+    # Mix with background music (lofi mood for Reddit stories)
+    from src.modules.editor import select_background_music, build_sidechain_audio
+
+    music_path = select_background_music(
+        visual_style=None,
+        duration=0,  # Will be computed from audio
+        content_mode="reddit",
+        proposed_title=story["title"],
+        content_mood="lofi",
+    )
+
+    if music_path:
+        audio_duration_for_mix = _get_audio_duration(normalized_audio)
+        mixed_audio = str(OUTPUT_DIR / "reddit_audio_mixed.m4a")
+        build_sidechain_audio(normalized_audio, music_path, mixed_audio, audio_duration_for_mix)
+        normalized_audio = mixed_audio  # Use mixed audio for the rest of the pipeline
+        log("REDDIT", "Background music mixed with sidechain ducking", "OK")
+
     # Generate subtitles using Faster-Whisper
     from src.modules.audio import generate_subtitles
     log("REDDIT", "Transcribing and aligning audio for subtitles...")

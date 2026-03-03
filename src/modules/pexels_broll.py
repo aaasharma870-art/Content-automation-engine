@@ -20,6 +20,34 @@ from src.utils.logger import log
 from src.utils.ffmpeg_utils import FFMPEG_BIN
 
 
+def _simplify_query(query: str) -> str:
+    """
+    Simplify verbose LLM-generated b-roll queries into 2-4 word Pexels-optimized searches.
+    Pexels API uses keyword matching, not semantic search. Long queries return garbage.
+    """
+    # Remove filler words that hurt keyword search
+    STOP_WORDS = {
+        "a", "an", "the", "of", "with", "and", "in", "on", "at", "to", "for",
+        "is", "are", "was", "were", "being", "been", "be", "have", "has", "had",
+        "do", "does", "did", "will", "would", "could", "should", "may", "might",
+        "shall", "can", "that", "this", "these", "those", "very", "really",
+        "showing", "featuring", "displaying", "depicting", "illustrating",
+        "close-up", "closeup", "wide-shot", "dramatic", "beautiful", "stunning",
+        "amazing", "incredible", "powerful", "emotional", "intense",
+    }
+    words = query.lower().replace("-", " ").split()
+    keywords = [w.strip(".,!?;:'\"") for w in words if w.strip(".,!?;:'\"") not in STOP_WORDS]
+
+    # Take the first 3-4 meaningful keywords
+    keywords = keywords[:4]
+
+    if not keywords:
+        # Fallback: just take first 3 words from original
+        keywords = query.split()[:3]
+
+    return " ".join(keywords)
+
+
 def search_pexels_video(query: str, duration_max: int = 15, **kwargs) -> dict | None:
     """
     Search Pexels for a short stock video matching the query.
@@ -53,7 +81,8 @@ def search_pexels_video(query: str, duration_max: int = 15, **kwargs) -> dict | 
         if useful_styles:
             style_suffix = " " + " ".join(useful_styles[:2])
 
-    enhanced_query = f"{query}{style_suffix}"
+    simplified = _simplify_query(query)
+    enhanced_query = f"{simplified}{style_suffix}"
     log("PEXELS", f"Searching Pexels for: \"{enhanced_query[:60]}\"...")
 
     headers = {"Authorization": PEXELS_API_KEY}
@@ -77,8 +106,25 @@ def search_pexels_video(query: str, duration_max: int = 15, **kwargs) -> dict | 
         return None
 
     videos = data.get("videos", [])
+
+    # Retry with progressively simpler queries if no results
     if not videos:
-        log("PEXELS", "No results found on Pexels", "WARN")
+        # Try just the first 2 keywords
+        retry_query = " ".join(enhanced_query.split()[:2])
+        if retry_query != enhanced_query:
+            log("PEXELS", f"No results. Retrying with: \"{retry_query}\"")
+            params["query"] = retry_query
+            try:
+                resp = requests.get("https://api.pexels.com/videos/search",
+                                    headers=headers, params=params, timeout=15)
+                resp.raise_for_status()
+                data = resp.json()
+                videos = data.get("videos", [])
+            except Exception:
+                pass
+
+    if not videos:
+        log("PEXELS", "No results found on Pexels after retry", "WARN")
         return None
 
     # Score and rank candidate videos by quality, duration fit, and resolution

@@ -134,8 +134,23 @@ def remove_silence(input_path: str, output_path: str) -> str:
     return output_path
 
 
+def _get_track_duration(music_path) -> float:
+    """Get approximate duration of a music file using ffprobe."""
+    try:
+        from src.modules.utils import get_ffprobe_bin
+        result = subprocess.run(
+            [get_ffprobe_bin(), "-v", "quiet", "-show_entries",
+             "format=duration", "-of", "csv=p=0", str(music_path)],
+            capture_output=True, text=True, timeout=10
+        )
+        return float(result.stdout.strip())
+    except Exception:
+        return 999.0  # Assume long enough if can't determine
+
+
 def select_background_music(visual_style: str = None, duration: float = 60.0,
-                            content_mode: str = None, proposed_title: str = None) -> str | None:
+                            content_mode: str = None, proposed_title: str = None,
+                            content_mood: str = None) -> str | None:
     """
     Select background music with context-aware matching.
 
@@ -183,6 +198,13 @@ def select_background_music(visual_style: str = None, duration: float = 60.0,
 
     subdir = None
 
+    # Signal 0: content_mood from Brain (HIGHEST PRIORITY - LLM analyzed the actual content)
+    mood_direct_map = {"cinematic": "cinematic", "upbeat": "upbeat", "tense": "tense",
+                       "lofi": "lofi", "neutral": "neutral"}
+    if content_mood and content_mood.lower() in mood_direct_map and not subdir:
+        subdir = mood_direct_map[content_mood.lower()]
+        log("EDITOR", f"Music mood from Brain: {content_mood} -> {subdir}")
+
     # Signal 1: Title keywords (strongest genre signal)
     if proposed_title:
         title_lower = proposed_title.lower()
@@ -221,23 +243,54 @@ def select_background_music(visual_style: str = None, duration: float = 60.0,
         for ext in MUSIC_EXTENSIONS:
             candidates.extend(music_subdir.glob(ext))
 
-    # Fallback: try root music directory
+    # Fallback: try mood-adjacent subdirectories (NOT random)
     if not candidates:
-        if music_subdir.exists():
-            log("EDITOR", f"No music in '{subdir}/', trying root directory", "WARN")
-        for ext in MUSIC_EXTENSIONS:
-            candidates.extend(MUSIC_DIR.glob(ext))
+        MOOD_ADJACENCY = {
+            "cinematic": ["tense", "neutral"],
+            "upbeat": ["neutral"],
+            "tense": ["cinematic"],
+            "lofi": ["neutral"],
+            "neutral": ["lofi", "cinematic"],
+        }
+        adjacent_moods = MOOD_ADJACENCY.get(subdir, ["neutral"])
+        for adj_mood in adjacent_moods:
+            adj_dir = MUSIC_DIR / adj_mood
+            if adj_dir.exists():
+                for ext in MUSIC_EXTENSIONS:
+                    candidates.extend(adj_dir.glob(ext))
+            if candidates:
+                log("EDITOR", f"No music in '{subdir}/', using adjacent mood '{adj_mood}'", "WARN")
+                break
 
-    # Final fallback: search all subdirectories recursively
+    # Last resort: any music at all (root + all subdirs)
     if not candidates:
+        log("EDITOR", f"No music in '{subdir}/' or adjacent moods, trying all music", "WARN")
         for ext in MUSIC_EXTENSIONS:
             candidates.extend(MUSIC_DIR.rglob(ext))
+
+    if not candidates:
+        # Try auto-downloading from Pixabay Music API
+        try:
+            from src.modules.pixabay_music import search_pixabay_music
+            pixabay_result = search_pixabay_music(subdir)
+            if pixabay_result:
+                log("EDITOR", f"Auto-downloaded music from Pixabay for mood: {subdir}", "OK")
+                return pixabay_result
+        except Exception as e:
+            log("EDITOR", f"Pixabay music fallback failed: {e}", "WARN")
 
     if not candidates:
         log("EDITOR", "No music files found in assets/music/", "WARN")
         return None
 
     candidates = list({str(c): c for c in candidates}.values())
+
+    # Prefer tracks longer than clip duration (avoids awkward loop/cut)
+    if duration > 0:
+        long_enough = [c for c in candidates if _get_track_duration(c) >= duration * 0.8]
+        if long_enough:
+            candidates = long_enough
+
     selected = str(random.choice(candidates))
     log("EDITOR", f"Music selected: {Path(selected).name} "
         f"(mood: {subdir}, style: {visual_style or 'default'}, mode: {content_mode or '?'})", "OK")
@@ -618,11 +671,13 @@ def render_short(
     # ── Step 2: Background music + sidechain ───
     impact_moments = clip_data.get("impact_moments", [])
     visual_style = clip_data.get("visual_style", "")
+    content_mood = clip_data.get("content_mood", "")
     music_path = select_background_music(
         visual_style=visual_style,
         duration=clip_duration,
         content_mode=clip_data.get("content_mode", "repurpose"),
         proposed_title=clip_data.get("proposed_title", ""),
+        content_mood=content_mood,
     )
     if music_path:
         build_sidechain_audio(clean_audio, music_path, final_audio, clip_duration,
@@ -711,22 +766,10 @@ def render_short(
         else:
             log("RENDER", f"LUT file not found: {lut_path} (skipping)", "WARN")
 
-    # ── Step 4c: YouTube Shorts Hook (3-Second Pattern Interrupt) ──
-    # Zoom in 1.0x -> 1.12x over first 0.6s, then ease back to 1.0x over 0.6-2.0s
-    # Creates a "punch in" effect that grabs attention then settles naturally
-    zoom_expr = (
-        "if(lt(t,0.6),"
-        "1+0.12*t/0.6,"                        # 0-0.6s: zoom in to 1.12x
-        "if(lt(t,2.0),"
-        "1.12-0.12*(t-0.6)/1.4,"               # 0.6-2.0s: ease back to 1.0x
-        "1))"                                    # 2.0s+: hold at 1.0x
-    )
-    filter_complex = filter_complex.replace(
-        "[vout]",
-        f"scale=w=iw*({zoom_expr}):h=ih*({zoom_expr}),"
-        f"crop={TARGET_WIDTH}:{TARGET_HEIGHT}[vout]"
-    )
-    log("RENDER", "YouTube Shorts Hook: punch-zoom pattern interrupt enabled")
+    # Punch-zoom removed — synthetic zoom is a known AI-content fingerprint
+    # that triggers algorithmic suppression and viewer skip behavior.
+    # The Ken Burns breathing effect (DYNAMIC_ZOOM_INTENSITY) in the face-crop
+    # filter provides organic-feeling subtle motion instead.
 
     # ── Step 4d: Signature Brand Watermark (Channel Identity) ──
     from config import ENABLE_BRAND_WATERMARK, BRAND_COLOR_CYAN, FONTS_DIR
