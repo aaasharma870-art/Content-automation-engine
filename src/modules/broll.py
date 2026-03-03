@@ -203,6 +203,9 @@ def find_broll(text_query: str, top_k: int = 1, **kwargs) -> list:
             "is_fallback": False,
         })
 
+    # Pre-filter: only return results above minimum similarity threshold
+    results = [r for r in results if r["similarity"] >= BROLL_MIN_SIMILARITY]
+
     if results:
         log("BROLL", f"Best match for \"{text_query[:50]}\": "
             f"{results[0]['video_name']} (sim: {results[0]['similarity']:.3f})", "OK")

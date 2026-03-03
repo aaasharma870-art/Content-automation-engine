@@ -65,7 +65,22 @@ async def run_pipeline(url_arg: str = None):
     for url in urls:
         _process_single_url(url)
 
+def _is_already_processed(url: str) -> bool:
+    """Check if URL was already processed (exists in history.txt)."""
+    if not HISTORY_FILE.exists():
+        return False
+    try:
+        history = HISTORY_FILE.read_text(encoding="utf-8")
+        return url.strip() in history
+    except Exception:
+        return False
+
 def _process_single_url(url):
+    # Check if already processed
+    if _is_already_processed(url):
+        log("REPURPOSE", f"Skipping (already processed): {url}", "WARN")
+        return
+
     log("REPURPOSE", "=" * 60)
     log("REPURPOSE", f"Processing: {url}")
     log("REPURPOSE", "=" * 60)
@@ -115,6 +130,10 @@ def process_video(url: str):
 
     # ENGAGEMENT FILTER: Only keep top-tier clips (virality_score >= 85)
     clips = [c for c in clips if c.get("virality_score", 0) >= 85]
+
+    # Remove overlapping clips (keep higher-scored one)
+    clips = _remove_overlaps(clips)
+
     clips = clips[:MAX_CLIPS_PER_VIDEO]  # Hard cap at 3 (quality over quantity)
 
     log("REPURPOSE", f"After filtering: {len(clips)} clips passed virality threshold (≥85)")
@@ -127,6 +146,8 @@ def process_video(url: str):
     clip_metas = []
 
     work_dir = Path(video_info.get("work_dir", ""))
+
+    batch_used_broll = set()  # Prevent same b-roll across clips in this batch
 
     for i, clip in enumerate(clips):
         clip_num = i + 1
@@ -184,7 +205,7 @@ def process_video(url: str):
                 from config import BROLL_MIN_SIMILARITY, ALLOW_BROLL_FALLBACK
                 visual_style = clip.get("visual_style", "cinematic")
 
-                used_videos = set()  # Prevent same b-roll clip used twice in one short
+                used_videos = set(batch_used_broll)  # Inherit batch-level + per-clip dedup
 
                 for bq in broll_queries[:4]:  # Cap at 4 b-roll inserts
                     query_text = bq.get("query", "")
@@ -205,6 +226,7 @@ def process_video(url: str):
                     if valid_results:
                         best = valid_results[0]
                         used_videos.add(best["video_path"])
+                        batch_used_broll.add(best["video_path"])
                         broll_inserts.append({
                             "video_path": best["video_path"],
                             "insert_time": insert_time,
@@ -218,10 +240,6 @@ def process_video(url: str):
 
             except Exception as e:
                 log("REPURPOSE", f"  B-Roll search failed: {e}", "WARN")
-
-        # Use first b-roll insert for now (editor currently supports single insert)
-        # TODO: Update editor to support multiple b-roll overlays
-        broll_insert = broll_inserts[0] if broll_inserts else None
 
         # Generate filename
         safe_title = re.sub(r'[^\w\s-]', '', title)[:40].strip()
@@ -239,7 +257,7 @@ def process_video(url: str):
             scene_data=scene_data,
             words=clip_words,
             output_filename=output_name,
-            broll_insert=broll_insert,
+            broll_inserts=broll_inserts if broll_inserts else None,
         )
 
         # ── AI Thumbnail Selection ──
@@ -320,6 +338,23 @@ def _log_error(url: str, error: Exception):
         f.write(f"Error: {error}\n")
         f.write(traceback.format_exc())
         f.write("\n" + "─" * 60 + "\n")
+
+def _remove_overlaps(clips: list) -> list:
+    """Remove overlapping clips, keeping the higher-scored one."""
+    if len(clips) <= 1:
+        return clips
+    # Already sorted by virality_score descending
+    kept = []
+    for clip in clips:
+        overlaps = False
+        for existing in kept:
+            # Check if clips overlap
+            if clip["start"] < existing["end"] and clip["end"] > existing["start"]:
+                overlaps = True
+                break
+        if not overlaps:
+            kept.append(clip)
+    return kept
 
 def _init_broll_index():
     try:

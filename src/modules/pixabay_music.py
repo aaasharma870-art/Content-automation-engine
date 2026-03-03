@@ -85,7 +85,11 @@ def search_pixabay_music(mood: str, duration_min: int = 60, duration_max: int = 
         candidates = hits[:3]  # Take top 3 regardless of duration
 
     best = candidates[0]
-    audio_url = best.get("audio", "") or best.get("previewURL", "")
+    audio_url = best.get("audio", "")
+    if not audio_url:
+        audio_url = best.get("url", "")
+        if audio_url:
+            log("PIXABAY_MUSIC", "Using 'url' field (primary 'audio' field missing)", "WARN")
     if not audio_url:
         log("PIXABAY_MUSIC", "No download URL in result", "WARN")
         return None

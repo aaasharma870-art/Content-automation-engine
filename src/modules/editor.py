@@ -134,16 +134,23 @@ def remove_silence(input_path: str, output_path: str) -> str:
     return output_path
 
 
+_track_duration_cache = {}
+
 def _get_track_duration(music_path) -> float:
-    """Get approximate duration of a music file using ffprobe."""
+    """Get approximate duration of a music file using ffprobe (cached)."""
+    path_str = str(music_path)
+    if path_str in _track_duration_cache:
+        return _track_duration_cache[path_str]
     try:
         from src.modules.utils import get_ffprobe_bin
         result = subprocess.run(
             [get_ffprobe_bin(), "-v", "quiet", "-show_entries",
-             "format=duration", "-of", "csv=p=0", str(music_path)],
+             "format=duration", "-of", "csv=p=0", path_str],
             capture_output=True, text=True, timeout=10
         )
-        return float(result.stdout.strip())
+        dur = float(result.stdout.strip())
+        _track_duration_cache[path_str] = dur
+        return dur
     except Exception:
         return 999.0  # Assume long enough if can't determine
 
@@ -155,10 +162,10 @@ def select_background_music(visual_style: str = None, duration: float = 60.0,
     Select background music with context-aware matching.
 
     Selection priority:
-    1. Content mode (reddit, generate, repurpose) -> preferred mood category
-    2. Visual style from Brain (e.g., "dark moody") -> style-based subdirectory
-    3. Title keyword scanning -> genre hints from content
-    4. Random from best-matching pool
+    0. content_mood from Brain (highest - LLM analyzed actual content)
+    1. Title keyword scanning (fallback genre hints)
+    2. Visual style from Brain (style-based matching)
+    3. Content mode default (pipeline-level fallback)
 
     Directory structure:
     - assets/music/cinematic/   -> dark, moody, luxury, dramatic content
@@ -205,8 +212,8 @@ def select_background_music(visual_style: str = None, duration: float = 60.0,
         subdir = mood_direct_map[content_mood.lower()]
         log("EDITOR", f"Music mood from Brain: {content_mood} -> {subdir}")
 
-    # Signal 1: Title keywords (strongest genre signal)
-    if proposed_title:
+    # Signal 1: Title keywords (override only if Brain didn't specify mood)
+    if proposed_title and not subdir:
         title_lower = proposed_title.lower()
         title_keywords = {
             "horror": "tense", "scary": "tense", "creepy": "tense",
@@ -605,7 +612,7 @@ def render_short(
     scene_data: dict,
     words: list,
     output_filename: str,
-    broll_insert: dict = None,
+    broll_inserts: list = None,
 ) -> str:
     """
     Assemble the final Short using FFmpeg.
@@ -613,7 +620,7 @@ def render_short(
     Pipeline:
     1. Trim source to clip boundaries
     2. Apply crop (face) OR letterbox+blur (screen)
-    3. Optionally overlay B-roll at specified timestamp
+    3. Optionally overlay B-roll at specified timestamps
     4. Normalize + silence-remove audio
     5. Mix with background music (sidechain compression)
     6. Burn in Hormozi-style karaoke subtitles
@@ -625,7 +632,7 @@ def render_short(
         scene_data: Dict from director.py (mode, crop_data, dimensions)
         words: Word dicts (0-based relative timestamps)
         output_filename: Output file name
-        broll_insert: Optional dict with video_path, insert_time, duration
+        broll_inserts: Optional list of dicts with video_path, insert_time, duration
 
     Returns:
         Path to rendered short
@@ -707,41 +714,56 @@ def render_short(
     else:
         filter_complex = _build_screen_filter(source_w, source_h, ass_path)
 
-    # ── Step 4b: Integrate B-Roll overlay ──────
+    # ── Step 4b: Integrate B-Roll overlays (multiple) ──
     broll_input_args = []
-    if broll_insert and Path(broll_insert["video_path"]).exists():
-        broll_path = broll_insert["video_path"]
-        insert_t = broll_insert.get("insert_time", 10.0)
-        broll_dur = broll_insert.get("duration", BROLL_OVERLAY_DURATION)
+    if broll_inserts:
+        valid_inserts = [b for b in broll_inserts if b and Path(b["video_path"]).exists()]
 
-        log("RENDER", f"Splicing B-roll at t={insert_t:.1f}s for {broll_dur:.1f}s")
+        if valid_inserts:
+            # Add all b-roll files as inputs
+            for b in valid_inserts:
+                broll_input_args.extend(["-i", b["video_path"]])
 
-        broll_input_args = ["-i", broll_path]
+            # Build overlay chain: each b-roll fades in/out at its timestamp
+            base_filter = filter_complex.replace("[vout]", "[vmain]")
+            overlay_chain = base_filter
 
-        # Rewrite filter: insert B-roll overlay between crop/scale and subtitles
-        # Remove the [vout] label from existing filter, add B-roll chain
-        base_filter = filter_complex.replace("[vout]", "[vmain]")
+            current_label = "vmain"
+            for idx, b in enumerate(valid_inserts):
+                insert_t = b.get("insert_time", 10.0)
+                broll_dur = b.get("duration", BROLL_OVERLAY_DURATION)
 
-        # Apply 300ms fade-in/out for smooth B-roll transitions
-        fade_dur = 0.3
-        fade_out_start = max(0, broll_dur - fade_dur)
-        broll_filter = (
-            f"{base_filter};"
-            f"[2:v]scale={TARGET_WIDTH}:{TARGET_HEIGHT}:"
-            f"force_original_aspect_ratio=decrease,"
-            f"pad={TARGET_WIDTH}:{TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
-            f"setpts=PTS-STARTPTS,"
-            f"fade=in:st=0:d={fade_dur},"
-            f"fade=out:st={fade_out_start}:d={fade_dur}"
-            f"[broll_faded];"
-            f"[vmain][broll_faded]overlay=enable='"
-            f"between(t,{insert_t},{insert_t + broll_dur})'"
-            f"[vout]"
-        )
-        filter_complex = broll_filter
-    else:
-        if broll_insert:
-            log("RENDER", f"B-roll file not found: {broll_insert.get('video_path', '?')}", "WARN")
+                # Clamp insert time so b-roll doesn't run past clip end
+                max_insert = clip_duration - broll_dur - 0.5
+                if insert_t > max_insert:
+                    insert_t = max(1.0, max_insert)
+
+                input_idx = 2 + idx  # 0=video, 1=audio, 2+=broll files
+                fade_dur = 0.3
+                fade_out_start = max(0, broll_dur - fade_dur)
+                next_label = "vout" if idx == len(valid_inserts) - 1 else f"vbr{idx}"
+
+                overlay_chain += (
+                    f";[{input_idx}:v]scale={TARGET_WIDTH}:{TARGET_HEIGHT}:"
+                    f"force_original_aspect_ratio=decrease,"
+                    f"pad={TARGET_WIDTH}:{TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
+                    f"setpts=PTS-STARTPTS,"
+                    f"fade=in:st=0:d={fade_dur},"
+                    f"fade=out:st={fade_out_start}:d={fade_dur}"
+                    f"[broll_{idx}];"
+                    f"[{current_label}][broll_{idx}]overlay=enable='"
+                    f"between(t,{insert_t},{insert_t + broll_dur})'"
+                    f"[{next_label}]"
+                )
+                current_label = next_label
+
+                log("RENDER", f"B-Roll [{idx+1}/{len(valid_inserts)}] at t={insert_t:.1f}s for {broll_dur:.1f}s")
+
+            filter_complex = overlay_chain
+        else:
+            for b in (broll_inserts or []):
+                if b:
+                    log("RENDER", f"B-roll file not found: {b.get('video_path', '?')}", "WARN")
 
     # ── Step 4c: Apply LUT color grading ──────
     # Priority: explicit LUT_FILE config > visual_style keyword mapping > none
