@@ -54,6 +54,7 @@ When scanning segments:
 - If list structure spans 30-60s → automatic virality_score floor of 85
 
 **ANTI-SLOP RULES:**
+- THE FIRST 2 SECONDS OF EACH CLIP MUST BE THE HOOK. The most surprising, controversial, or emotional statement MUST appear at the very start. NEVER start with: "So...", "Well...", "Basically...", "Let me explain...", "What happened was...", greetings, or context-setting. If the best hook is at second 5 of a segment, adjust start_time to begin AT the hook, not before it.
 - NEVER select filler ("thanks for watching", "subscribe", "let me know in the comments")
 - NEVER select segments just because they're near the beginning or end
 - PREFER strong declarative statements, surprising reveals, or contrarian takes
@@ -72,9 +73,16 @@ Prioritize: High-retention stories, contrarian takes, actionable tips, shocking 
 - `"screen_share"`: Charts, screens, visual data mentioned
 - `"gameplay"`: Gaming footage (Minecraft, GTA, Subway Surfers, etc.) — use when: no visible human speaker, game UI/HUD present, transcript references game actions/mechanics. This mode uses center-crop for full-screen immersive framing.
 
-**B-ROLL QUERY:**
-For each segment, identify ONE 3-second window needing visual supplementation.
-Provide `broll_query` (descriptive phrase) and `broll_insert_time` (offset from segment start).
+**B-ROLL QUERIES (MULTIPLE):**
+For each segment, identify 2-4 moments (each ~3 seconds) that need visual supplementation.
+Each b-roll entry needs:
+- `broll_query`: A SHORT, CONCRETE visual description (2-5 words max). Think like a stock footage search: "person typing laptop", "city skyline night", "cash money falling", "crowd cheering stadium". NEVER use abstract/verbose descriptions like "dramatic visualization of financial growth" — these return garbage from stock APIs.
+- `broll_insert_time`: Offset in seconds from segment start
+
+Field: `broll_queries` (list of {{"query": "...", "insert_time": float}})
+
+GOOD broll_query examples: "stock chart green", "handshake business deal", "running athlete sunset", "coding laptop screen"
+BAD broll_query examples: "a dramatic close-up showing the emotional weight of the revelation", "visualization of financial market dynamics with ascending trajectories"
 
 **VISUAL STYLE:**
 For each segment, identify the mood/vibe (e.g., "dark moody", "bright energetic", "luxury minimal").
@@ -127,8 +135,11 @@ Field: `visual_viability_score` (0-99, for debugging)
     "description": "Expert reveals the hidden signal most traders miss",
     "hook_text": "The one indicator that never lies...",
     "hashtags": ["#trading", "#stocks", "#investing", "#finance"],
-    "broll_query": "close-up stock chart with green candles rising",
-    "broll_insert_time": 12.0,
+    "broll_queries": [
+      {{"query": "stock chart green candles", "insert_time": 8.0}},
+      {{"query": "trader watching screens", "insert_time": 18.0}},
+      {{"query": "money cash counting", "insert_time": 28.0}}
+    ],
     "visual_style": "high-tech financial data visualization",
     "emphasis_words": [{{"word": "never", "type": "negative"}}, {{"word": "indicator", "type": "key_noun"}}, {{"word": "hidden", "type": "key_adjective"}}],
     "impact_moments": [8.5, 22.0],
@@ -325,6 +336,8 @@ def _parse_response(raw_text: str) -> list:
             "description": str(clip.get("description", "")),
             "hook_text": str(clip.get("hook_text", "")),
             "hashtags": clip.get("hashtags", []),
+            "broll_queries": clip.get("broll_queries", []),
+            # Backward compat: if old single-query format, convert to list
             "broll_query": str(clip.get("broll_query", "")),
             "broll_insert_time": float(clip.get("broll_insert_time", 0)),
             "visual_style": str(clip.get("visual_style", "cinematic")),
@@ -333,5 +346,10 @@ def _parse_response(raw_text: str) -> list:
             "impact_moments": clip.get("impact_moments", []),
             "visual_viability_score": int(clip.get("visual_viability_score", 50)),
         })
+
+        # Migrate old single broll_query to broll_queries list format
+        entry = valid[-1]
+        if not entry["broll_queries"] and entry["broll_query"]:
+            entry["broll_queries"] = [{"query": entry["broll_query"], "insert_time": entry["broll_insert_time"]}]
 
     return valid

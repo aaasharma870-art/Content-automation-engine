@@ -24,6 +24,7 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")  # "gemini" | "openai"
 # Social Media Distribution
 AYRSHARE_API_KEY = os.getenv("AYRSHARE_API_KEY", "")
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
+PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY", "")
 
 # ── Paths ────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
@@ -87,7 +88,7 @@ SIDECHAIN_THRESHOLD = 0.015
 SIDECHAIN_RATIO = 3
 SIDECHAIN_ATTACK = 1          # ms — instant drop when speech detected
 SIDECHAIN_RELEASE = 500        # ms — smooth fade-back during pauses
-MUSIC_VOLUME_DB = -20          # Subtler background music (down from -14 for less intrusion)
+MUSIC_VOLUME_DB = -14          # Was -20 — audible background music creates energy and covers dead air
 
 # ── Director Constants ───────────────────────────
 FACE_SAMPLE_RATE = 4           # Lower = smoother tracking (was 10)
@@ -95,32 +96,32 @@ KALMAN_PROCESS_NOISE = 0.1     # Higher = faster response (was 0.03)
 
 # ── Caption Styling (Hormozi Aesthetic) ──────────
 CAPTION_FONT = "Montserrat-Bold"
-CAPTION_FONT_SIZE = 70                   # Readable on mobile
+CAPTION_FONT_SIZE = 78                   # Was 70 — bigger for thumb-scrolling on mobile
 CAPTION_PRIMARY_COLOR = "&H00FFFFFF"     # White base (BGR in ASS)
 CAPTION_HIGHLIGHT_COLOR = "&H00FFFF00"   # Neon cyan (SIGNATURE BRAND COLOR - BGR format)
 CAPTION_OUTLINE_COLOR = "&H00000000"     # Black outline
 CAPTION_OUTLINE_WIDTH = 5                # Thicker outline for readability
 CAPTION_SHADOW_DEPTH = 3
-CAPTION_MARGIN_BOTTOM = 600              # Safe zone: keeps captions above TikTok UI (35% = 672px)
-CAPTION_MAX_CHARS = 15                   # Max chars on screen at once
+CAPTION_MARGIN_BOTTOM = 700              # Was 600 — push higher into visual center, above TikTok UI
+CAPTION_MAX_CHARS = 20                   # Was 15 — less cramped, more readable
 CAPTION_UPPERCASE = True
 
 # ── Signature Brand Identity ─────────────────────
 BRAND_COLOR_CYAN = "&H00FFFF00"          # Neon cyan (BGR) - Primary brand color
 BRAND_COLOR_PURPLE = "&H00FF00FF"        # Electric purple (BGR) - Secondary brand
-ENABLE_BRAND_WATERMARK = True            # Show brand logo/watermark in corner
+ENABLE_BRAND_WATERMARK = False           # Platforms suppress watermarked/branded automation content
 
 # ── B-Roll (CLIP/FAISS) ─────────────────────────
 CLIP_MODEL_NAME = "ViT-B/32"
 BROLL_SAMPLE_FRAMES = 5      # Frames to extract per b-roll clip
 BROLL_OVERLAY_DURATION = 3.0  # Seconds of b-roll to inject
-BROLL_MIN_SIMILARITY = 0.25  # Review: Increased from 0.20 to reduce bad matches
+BROLL_MIN_SIMILARITY = 0.30  # Raised from 0.25 — prevents visually irrelevant b-roll
 
 # ── Pipeline Settings ────────────────────────────
 POLL_INTERVAL_SECONDS = 30
 MAX_CLIPS_PER_VIDEO = 3  # Force "top 3" selection (quality over quantity)
-CLIP_MIN_DURATION = 30
-CLIP_MAX_DURATION = 59.5  # YouTube Shorts hard limit (60.0s = death sentence)
+CLIP_MIN_DURATION = 15    # Was 30 — TikTok discovery favors shorter clips with high completion
+CLIP_MAX_DURATION = 45    # Was 59.5 — higher completion rate drives algorithm ranking
 CAPTION_REVIEW_PAUSE = False   # Pause for human caption review before rendering
 CRITIC_ENABLED = False         # Enable Multimodal Critic (Gemini Vision) for QA
 
@@ -132,9 +133,9 @@ SAFE_ZONE_RIGHT = 0.15         # 15% right (Like, comment, share buttons)
 SAFE_ZONE_LEFT = 0.02          # 2% left (minimal margin)
 
 # ── NVENC Encoding ───────────────────────────────
-USE_NVENC = True
+USE_NVENC = False          # Was True — most machines don't have NVENC, fallback chain adds latency
 NVENC_PRESET = "slow"
-USE_HWACCEL_CUDA = True        # CUDA-accelerated decoding (requires NVIDIA GPU)
+USE_HWACCEL_CUDA = False   # Was True — requires NVIDIA GPU
 
 # ── Color Grading (LUTs) ────────────────────────
 LUT_FILE = ""                  # Place .cube file in assets/luts/, set name here
@@ -142,7 +143,7 @@ LUT_FILE = ""                  # Place .cube file in assets/luts/, set name here
 
 # ── B-Roll Policy ──────────────────────────────
 ALLOW_BROLL_FALLBACK = True    # Allow Pexels fallback when no CLIP match exists
-PEXELS_CLIP_VERIFY = False     # True = CLIP-verify Pexels thumbnails (slower but accurate)
+PEXELS_CLIP_VERIFY = True      # CLIP-verify Pexels thumbnails (slower but prevents bad matches)
 
 # ── Visual Style → LUT Mapping ─────────────────
 VISUAL_STYLE_LUT_MAP = {
@@ -165,7 +166,7 @@ EMPHASIS_COLOR_NEGATIVE = "&H000000FF"       # Red
 SOCIAL_LUFS = -14              # Final output loudness (TikTok/Reels/Shorts standard)
 
 # ── Dynamic Zoom ────────────────────────────────
-DYNAMIC_ZOOM_INTENSITY = 1.05  # Max zoom factor (1.0 = off, 1.05 = subtle, 1.15 = punchy)
+DYNAMIC_ZOOM_INTENSITY = 1.08  # Was 1.05 — visible subtle motion on mobile
 
 # ── Thumbnail Extraction ────────────────────────
 THUMBNAIL_FRAME_COUNT = 20     # Candidate frames to score for best thumbnail

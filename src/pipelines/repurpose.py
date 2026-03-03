@@ -166,46 +166,62 @@ def process_video(url: str):
 
         log("REPURPOSE", f"[PHASE 5/6] RENDERING CLIP {clip_num}/{len(clips)}")
 
-        # ── B-Roll search ──
-        broll_insert = None
-        broll_query = clip.get("broll_query", "")
+        # ── B-Roll search (multiple inserts) ──
+        broll_inserts = []
+        broll_queries = clip.get("broll_queries", [])
+
+        # Backward compat: single query format
+        if not broll_queries:
+            single_query = clip.get("broll_query", "")
+            if single_query and len(single_query) > 5:
+                broll_queries = [{"query": single_query, "insert_time": clip.get("broll_insert_time", 10.0)}]
+
         clip_duration = clip["end"] - clip["start"]
-        # Only search if query is specific enough (longer than 5 chars)
-        if broll_query and len(broll_query) > 5:
+
+        if broll_queries and clip_duration > 15:
             try:
                 from src.modules.broll import find_broll
                 from config import BROLL_MIN_SIMILARITY, ALLOW_BROLL_FALLBACK
                 visual_style = clip.get("visual_style", "cinematic")
 
-                # Search local index first, then Pexels
-                broll_results = find_broll(broll_query, top_k=3, visual_style=visual_style)
+                used_videos = set()  # Prevent same b-roll clip used twice in one short
 
-                # Decoupled filtering: CLIP matches must pass threshold,
-                # Pexels fallbacks are accepted if ALLOW_BROLL_FALLBACK is True
-                valid_results = [
-                    r for r in broll_results
-                    if (r.get("similarity") is not None and r["similarity"] >= BROLL_MIN_SIMILARITY)
-                    or (r.get("is_fallback") and ALLOW_BROLL_FALLBACK)
-                ]
+                for bq in broll_queries[:4]:  # Cap at 4 b-roll inserts
+                    query_text = bq.get("query", "")
+                    insert_time = float(bq.get("insert_time", 10.0))
 
-                if valid_results:
-                    best = valid_results[0]
-                    # Don't insert B-roll if the segment is extremely short
-                    if clip_duration > 15:
-                        broll_insert = {
+                    if not query_text or len(query_text) < 3:
+                        continue
+
+                    broll_results = find_broll(query_text, top_k=3, visual_style=visual_style)
+
+                    valid_results = [
+                        r for r in broll_results
+                        if r["video_path"] not in used_videos
+                        and ((r.get("similarity") is not None and r["similarity"] >= BROLL_MIN_SIMILARITY)
+                             or (r.get("is_fallback") and ALLOW_BROLL_FALLBACK))
+                    ]
+
+                    if valid_results:
+                        best = valid_results[0]
+                        used_videos.add(best["video_path"])
+                        broll_inserts.append({
                             "video_path": best["video_path"],
-                            "insert_time": clip.get("broll_insert_time", 10.0),
+                            "insert_time": insert_time,
                             "duration": 3.0,
-                        }
+                        })
                         sim_label = f"Sim: {best['similarity']:.2f}" if best.get("similarity") is not None else "fallback"
-                        log("REPURPOSE", f"  B-Roll selected: {best['video_name']} ({sim_label}, src: {best.get('source', '?')})")
-                    else:
-                        log("REPURPOSE", "  Clip too short for B-roll, skipping.")
-                else:
-                    log("REPURPOSE", f"  No B-roll found with similarity >= {BROLL_MIN_SIMILARITY}")
+                        log("REPURPOSE", f"  B-Roll [{len(broll_inserts)}]: {best['video_name']} ({sim_label}) at t={insert_time:.1f}s")
+
+                if not broll_inserts:
+                    log("REPURPOSE", f"  No B-roll found meeting quality threshold")
 
             except Exception as e:
                 log("REPURPOSE", f"  B-Roll search failed: {e}", "WARN")
+
+        # Use first b-roll insert for now (editor currently supports single insert)
+        # TODO: Update editor to support multiple b-roll overlays
+        broll_insert = broll_inserts[0] if broll_inserts else None
 
         # Generate filename
         safe_title = re.sub(r'[^\w\s-]', '', title)[:40].strip()
